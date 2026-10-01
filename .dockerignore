@@ -1,0 +1,10 @@
+.git
+.github
+target
+tardy.sqlite
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+Dockerfile*
+docs
+README.md

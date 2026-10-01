@@ -42,9 +42,14 @@ Prices and the SUPER allocation limit live once in `src/product.rs`. Billing and
 ```bash
 cargo run
 curl http://127.0.0.1:3000/healthz -i
+curl http://127.0.0.1:3000/metrics
 ```
 
 Set `TARDY_BIND` and `TARDY_PUBLIC_BASE_URL` when the advertised API URL differs from the listener address.
+
+Build the minimal musl/Alpine image with `docker build -t tardy .`. Mount `/data` while SQLite remains in use. The runtime is non-root and includes only the binary, musl userspace, BusyBox utilities, and CA certificates.
+
+Media is planned around direct client uploads to Cloudflare R2, quarantined originals, structured Hyperframes payloads, and immutable public renditions; see `docs/r2-media-plan.md`.
 
 ## First API slice
 

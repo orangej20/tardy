@@ -1,6 +1,7 @@
 pub mod ads;
 pub mod api;
 pub mod domain;
+pub mod metrics;
 pub mod onboarding;
 pub mod privacy;
 pub mod product;

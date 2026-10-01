@@ -1,6 +1,7 @@
 use crate::domain::{
     AgentCapabilities, AgentHandoff, LiveEventPayload, ProfilePrivacy, ShareSubject, Visibility,
 };
+use crate::metrics::Metrics;
 use crate::onboarding::{AccountRegistry, OnboardingError};
 use crate::ranking::LuaRanker;
 use crate::store::{MemoryStore, NewLive, NewProfile, NewReel, Store, StoreError};
@@ -8,7 +9,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Json, Router, middleware};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,6 +20,7 @@ pub struct AppState {
     pub ranker: LuaRanker,
     pub public_base_url: String,
     pub accounts: Arc<AccountRegistry>,
+    pub metrics: Arc<Metrics>,
 }
 
 impl AppState {
@@ -30,6 +32,7 @@ impl AppState {
             ranker: LuaRanker::default_policy()?,
             public_base_url: public_base_url.into().trim_end_matches('/').to_owned(),
             accounts: Arc::new(AccountRegistry::in_memory().expect("in-memory account registry")),
+            metrics: Arc::new(Metrics::new()),
         })
     }
 
@@ -42,13 +45,16 @@ impl AppState {
             ranker: LuaRanker::default_policy()?,
             public_base_url: public_base_url.into().trim_end_matches('/').to_owned(),
             accounts: Arc::new(AccountRegistry::open(path)?),
+            metrics: Arc::new(Metrics::new()),
         })
     }
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
+    let metrics = state.metrics.clone();
     Router::new()
         .route("/healthz", get(|| async { StatusCode::NO_CONTENT }))
+        .route("/metrics", get(metrics_endpoint))
         .route("/llms.txt", get(llms_txt))
         .route("/v1/profiles", post(create_profile))
         .route("/v1/profiles/{handle}", get(get_profile))
@@ -71,6 +77,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/feed", get(feed))
         .route("/v1/agent-handoffs", post(agent_handoff))
         .with_state(state)
+        .layer(middleware::from_fn(move |request, next| {
+            crate::metrics::track(metrics.clone(), request, next)
+        }))
+}
+
+async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Response {
+    crate::metrics::response(&state.metrics)
 }
 
 #[derive(Deserialize)]
@@ -427,10 +440,9 @@ async fn revoke_share(
 async fn issue_agent_code(
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, ApiError> {
-    Ok((
-        StatusCode::CREATED,
-        Json(state.accounts.issue_claim(now_ms()?)?),
-    ))
+    let claim = state.accounts.issue_claim(now_ms()?)?;
+    state.metrics.note_claim_issued();
+    Ok((StatusCode::CREATED, Json(claim)))
 }
 
 #[derive(Deserialize)]
@@ -443,10 +455,9 @@ async fn claim_agent_code(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ClaimAgentCode>,
 ) -> Result<impl IntoResponse, ApiError> {
-    Ok((
-        StatusCode::CREATED,
-        Json(state.accounts.claim(&body.code, &body.email, now_ms()?)?),
-    ))
+    let account = state.accounts.claim(&body.code, &body.email, now_ms()?)?;
+    state.metrics.note_account_claimed();
+    Ok((StatusCode::CREATED, Json(account)))
 }
 
 fn selected_profile(headers: &HeaderMap) -> Result<Option<Uuid>, ApiError> {
@@ -809,5 +820,39 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn metrics_use_bounded_route_templates() {
+        let app = router(Arc::new(AppState::in_memory("https://tardy.test").unwrap()));
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/profiles/not-a-real-profile")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let text = String::from_utf8(
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(text.contains("route=\"/v1/profiles/{handle}\""));
+        assert!(!text.contains("not-a-real-profile"));
     }
 }
