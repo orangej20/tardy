@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 FROM rust:1.88-alpine3.22 AS builder
 
-RUN apk add --no-cache musl-dev
+RUN apk add --no-cache build-base cmake perl
 WORKDIR /build
 
 COPY Cargo.toml Cargo.lock ./

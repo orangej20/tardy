@@ -1,6 +1,7 @@
 use crate::domain::{
     AgentCapabilities, AgentHandoff, LiveEventPayload, ProfilePrivacy, ShareSubject, Visibility,
 };
+use crate::media::{MediaError, MediaService, UploadIntent};
 use crate::metrics::Metrics;
 use crate::onboarding::{AccountRegistry, OnboardingError};
 use crate::ranking::LuaRanker;
@@ -21,6 +22,7 @@ pub struct AppState {
     pub public_base_url: String,
     pub accounts: Arc<AccountRegistry>,
     pub metrics: Arc<Metrics>,
+    pub media: Arc<MediaService>,
 }
 
 impl AppState {
@@ -33,6 +35,7 @@ impl AppState {
             public_base_url: public_base_url.into().trim_end_matches('/').to_owned(),
             accounts: Arc::new(AccountRegistry::in_memory().expect("in-memory account registry")),
             metrics: Arc::new(Metrics::new()),
+            media: Arc::new(MediaService::new(None)),
         })
     }
 
@@ -46,6 +49,7 @@ impl AppState {
             public_base_url: public_base_url.into().trim_end_matches('/').to_owned(),
             accounts: Arc::new(AccountRegistry::open(path)?),
             metrics: Arc::new(Metrics::new()),
+            media: Arc::new(MediaService::from_env()?),
         })
     }
 }
@@ -70,6 +74,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/shared/{token}", get(resolve_share))
         .route("/v1/onboarding/agent-codes", post(issue_agent_code))
         .route("/v1/onboarding/claims", post(claim_agent_code))
+        .route("/v1/uploads", post(authorize_upload))
+        .route("/v1/uploads/{id}/complete", post(complete_upload))
         .route("/v1/reels", post(publish_reel))
         .route("/v1/lives", post(start_live))
         .route("/v1/lives/{id}/events", post(append_event).get(list_events))
@@ -460,6 +466,30 @@ async fn claim_agent_code(
     Ok((StatusCode::CREATED, Json(account)))
 }
 
+async fn authorize_upload(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(intent): Json<UploadIntent>,
+) -> Result<impl IntoResponse, ApiError> {
+    let actor = authenticated_actor(&state, &headers)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(state.media.authorize(actor, intent, now_ms()?).await?),
+    ))
+}
+
+async fn complete_upload(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    let actor = authenticated_actor(&state, &headers)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(state.media.complete(actor, id, now_ms()?).await?),
+    ))
+}
+
 fn selected_profile(headers: &HeaderMap) -> Result<Option<Uuid>, ApiError> {
     headers
         .get("x-tardy-profile-id")
@@ -668,6 +698,25 @@ impl From<OnboardingError> for ApiError {
             OnboardingError::Database(_)
             | OnboardingError::Poisoned
             | OnboardingError::TimestampOverflow => Self::internal(value.to_string()),
+        }
+    }
+}
+
+impl From<MediaError> for ApiError {
+    fn from(value: MediaError) -> Self {
+        match value {
+            MediaError::Unconfigured => Self {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                message: value.to_string(),
+            },
+            MediaError::UnsupportedType
+            | MediaError::InvalidSize(_)
+            | MediaError::MetadataMismatch => Self::bad_request(value.to_string()),
+            MediaError::NotFound => Self::not_found(value.to_string()),
+            MediaError::Forbidden => Self::forbidden(value.to_string()),
+            MediaError::ObjectStore(_) | MediaError::Poisoned | MediaError::TimestampOverflow => {
+                Self::internal(value.to_string())
+            }
         }
     }
 }

@@ -51,6 +51,8 @@ Build the minimal musl/Alpine image with `docker build -t tardy .`. Mount `/data
 
 Media is planned around direct client uploads to Cloudflare R2, quarantined originals, structured Hyperframes payloads, and immutable public renditions; see `docs/r2-media-plan.md`.
 
+Enable uploads with `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET`. Without them, upload authorization fails loudly with `503` while the rest of the service remains available. Credentials stay server-side and mint 15-minute, key-scoped presigned PUTs.
+
 ## First API slice
 
 | Method | Path | Purpose |
@@ -64,6 +66,8 @@ Media is planned around direct client uploads to Cloudflare R2, quarantined orig
 | `GET` | `/v1/shared/{token}` | Resolve an active share grant |
 | `POST` | `/v1/onboarding/agent-codes` | Issue a one-time agent claim code |
 | `POST` | `/v1/onboarding/claims` | Claim an account with a code and email |
+| `POST` | `/v1/uploads` | Authorize a bounded direct-to-R2 upload |
+| `POST` | `/v1/uploads/{id}/complete` | HEAD-verify and quarantine an uploaded object |
 | `POST` | `/v1/reels` | Publish a rendered Hyperframes reel reference |
 | `POST` | `/v1/lives` | Start an agent coding session |
 | `POST/GET` | `/v1/lives/{id}/events` | Append or resume ordered live events |
