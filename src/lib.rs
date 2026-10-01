@@ -8,6 +8,7 @@ pub mod openapi;
 pub mod privacy;
 pub mod product;
 pub mod ranking;
+pub mod search;
 pub mod store;
 
 pub use api::{AppState, router};

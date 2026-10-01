@@ -29,6 +29,14 @@ pub struct ClaimedAccount {
     pub api_token: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AiConsent {
+    pub provider: String,
+    pub purpose: String,
+    pub policy_version: String,
+    pub granted_at_ms: u64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum OnboardingError {
     #[error("onboarding database: {0}")]
@@ -78,6 +86,15 @@ impl AccountRegistry {
                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
                profile_id TEXT NOT NULL UNIQUE,
                PRIMARY KEY (account_id, profile_id)
+             );
+             CREATE TABLE IF NOT EXISTS external_ai_consents (
+               account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+               provider TEXT NOT NULL,
+               purpose TEXT NOT NULL,
+               policy_version TEXT NOT NULL,
+               granted_at_ms INTEGER NOT NULL,
+               revoked_at_ms INTEGER,
+               PRIMARY KEY (account_id, provider, purpose)
              );",
         )?;
         Ok(Self {
@@ -203,6 +220,84 @@ impl AccountRegistry {
             .optional()?;
         Ok(found.is_some())
     }
+
+    pub fn grant_ai_consent(
+        &self,
+        account_id: Uuid,
+        provider: &str,
+        purpose: &str,
+        policy_version: &str,
+        at_ms: u64,
+    ) -> Result<AiConsent, OnboardingError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| OnboardingError::Poisoned)?;
+        connection.execute(
+            "INSERT INTO external_ai_consents
+               (account_id, provider, purpose, policy_version, granted_at_ms, revoked_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL)
+             ON CONFLICT(account_id, provider, purpose) DO UPDATE SET
+               policy_version = excluded.policy_version,
+               granted_at_ms = excluded.granted_at_ms,
+               revoked_at_ms = NULL",
+            params![
+                account_id.to_string(),
+                provider,
+                purpose,
+                policy_version,
+                to_i64(at_ms)?
+            ],
+        )?;
+        Ok(AiConsent {
+            provider: provider.into(),
+            purpose: purpose.into(),
+            policy_version: policy_version.into(),
+            granted_at_ms: at_ms,
+        })
+    }
+
+    pub fn revoke_ai_consent(
+        &self,
+        account_id: Uuid,
+        provider: &str,
+        purpose: &str,
+        at_ms: u64,
+    ) -> Result<(), OnboardingError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| OnboardingError::Poisoned)?;
+        connection.execute(
+            "UPDATE external_ai_consents SET revoked_at_ms = ?1
+             WHERE account_id = ?2 AND provider = ?3 AND purpose = ?4 AND revoked_at_ms IS NULL",
+            params![to_i64(at_ms)?, account_id.to_string(), provider, purpose],
+        )?;
+        Ok(())
+    }
+
+    pub fn has_ai_consent(
+        &self,
+        account_id: Uuid,
+        provider: &str,
+        purpose: &str,
+        policy_version: &str,
+    ) -> Result<bool, OnboardingError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| OnboardingError::Poisoned)?;
+        let found: Option<i64> = connection
+            .query_row(
+                "SELECT 1 FROM external_ai_consents
+                 WHERE account_id = ?1 AND provider = ?2 AND purpose = ?3
+                   AND policy_version = ?4 AND revoked_at_ms IS NULL",
+                params![account_id.to_string(), provider, purpose, policy_version],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(found.is_some())
+    }
 }
 
 fn hash_code(code: &str) -> Vec<u8> {
@@ -258,5 +353,41 @@ mod tests {
             registry.claim(&ticket.code, "agent@example.com", ticket.expires_at_ms),
             Err(OnboardingError::InvalidClaim)
         ));
+    }
+
+    #[test]
+    fn external_ai_consent_is_versioned_and_revocable() {
+        let registry = AccountRegistry::in_memory().unwrap();
+        let ticket = registry.issue_claim(1).unwrap();
+        let claimed = registry
+            .claim(&ticket.code, "search@example.com", 2)
+            .unwrap();
+        let account = claimed.account.id;
+        assert!(
+            !registry
+                .has_ai_consent(account, "voyage", "search_reranking", "search-v1")
+                .unwrap()
+        );
+        registry
+            .grant_ai_consent(account, "voyage", "search_reranking", "search-v1", 3)
+            .unwrap();
+        assert!(
+            registry
+                .has_ai_consent(account, "voyage", "search_reranking", "search-v1")
+                .unwrap()
+        );
+        assert!(
+            !registry
+                .has_ai_consent(account, "voyage", "search_reranking", "search-v2")
+                .unwrap()
+        );
+        registry
+            .revoke_ai_consent(account, "voyage", "search_reranking", 4)
+            .unwrap();
+        assert!(
+            !registry
+                .has_ai_consent(account, "voyage", "search_reranking", "search-v1")
+                .unwrap()
+        );
     }
 }

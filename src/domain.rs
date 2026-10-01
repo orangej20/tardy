@@ -127,6 +127,12 @@ pub struct HyperTardyItem {
     pub window_started_at_ms: TimestampMs,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SavedPost {
+    pub reel: Reel,
+    pub saved_at_ms: TimestampMs,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LiveStatus {

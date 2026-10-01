@@ -1,7 +1,7 @@
 use crate::domain::{
     DirectMessage, DirectThread, EngagementKind, EngagementReceipt, FeedItem, HyperTardyItem,
     LiveEvent, LiveEventPayload, LiveSession, LiveStatus, Profile, ProfilePrivacy, PublicProfile,
-    Reel, ShareGrant, ShareSubject, Visibility,
+    Reel, SavedPost, ShareGrant, ShareSubject, Visibility,
 };
 use crate::privacy::PrivacyPolicy;
 use std::collections::{HashMap, HashSet};
@@ -99,6 +99,15 @@ pub trait Store: Send + Sync {
         now_ms: u64,
         limit: usize,
     ) -> Result<Vec<HyperTardyItem>, StoreError>;
+    fn save_post(
+        &self,
+        account_id: Uuid,
+        viewer_id: Uuid,
+        reel_id: Uuid,
+        at_ms: u64,
+    ) -> Result<SavedPost, StoreError>;
+    fn unsave_post(&self, account_id: Uuid, reel_id: Uuid) -> Result<(), StoreError>;
+    fn saved_posts(&self, account_id: Uuid, viewer_id: Uuid) -> Result<Vec<SavedPost>, StoreError>;
     fn public_profile(
         &self,
         handle: &str,
@@ -150,6 +159,7 @@ struct State {
     shares: HashMap<Uuid, ShareGrant>,
     share_ids_by_token: HashMap<Uuid, Uuid>,
     engagements: Vec<EngagementReceipt>,
+    saved_posts: HashMap<(Uuid, Uuid), u64>,
 }
 
 #[derive(Clone, Default)]
@@ -326,7 +336,11 @@ impl Store for MemoryStore {
     ) -> Result<EngagementReceipt, StoreError> {
         let mut state = self.state.write().map_err(|_| StoreError::Poisoned)?;
         require_profile(&state, actor)?;
-        let reel = state.reels.get(&reel_id).ok_or(StoreError::ReelNotFound)?;
+        let reel = state
+            .reels
+            .get(&reel_id)
+            .cloned()
+            .ok_or(StoreError::ReelNotFound)?;
         if !PrivacyPolicy::can_view_content(
             Some(actor),
             reel.profile_id,
@@ -426,6 +440,74 @@ impl Store for MemoryStore {
         });
         items.truncate(limit);
         Ok(items)
+    }
+
+    fn save_post(
+        &self,
+        account_id: Uuid,
+        viewer_id: Uuid,
+        reel_id: Uuid,
+        at_ms: u64,
+    ) -> Result<SavedPost, StoreError> {
+        let mut state = self.state.write().map_err(|_| StoreError::Poisoned)?;
+        require_profile(&state, viewer_id)?;
+        let reel = state
+            .reels
+            .get(&reel_id)
+            .cloned()
+            .ok_or(StoreError::ReelNotFound)?;
+        if !PrivacyPolicy::can_view_content(
+            Some(viewer_id),
+            reel.profile_id,
+            reel.visibility,
+            blocked_between(&state, Some(viewer_id), reel.profile_id),
+        ) {
+            return Err(StoreError::ReelNotFound);
+        }
+        let saved_at_ms = *state
+            .saved_posts
+            .entry((account_id, reel_id))
+            .or_insert(at_ms);
+        Ok(SavedPost { reel, saved_at_ms })
+    }
+
+    fn unsave_post(&self, account_id: Uuid, reel_id: Uuid) -> Result<(), StoreError> {
+        self.state
+            .write()
+            .map_err(|_| StoreError::Poisoned)?
+            .saved_posts
+            .remove(&(account_id, reel_id));
+        Ok(())
+    }
+
+    fn saved_posts(&self, account_id: Uuid, viewer_id: Uuid) -> Result<Vec<SavedPost>, StoreError> {
+        let state = self.state.read().map_err(|_| StoreError::Poisoned)?;
+        require_profile(&state, viewer_id)?;
+        let mut posts = state
+            .saved_posts
+            .iter()
+            .filter(|((owner, _), _)| *owner == account_id)
+            .filter_map(|((_, reel_id), saved_at_ms)| {
+                let reel = state.reels.get(reel_id)?;
+                PrivacyPolicy::can_view_content(
+                    Some(viewer_id),
+                    reel.profile_id,
+                    reel.visibility,
+                    blocked_between(&state, Some(viewer_id), reel.profile_id),
+                )
+                .then(|| SavedPost {
+                    reel: reel.clone(),
+                    saved_at_ms: *saved_at_ms,
+                })
+            })
+            .collect::<Vec<_>>();
+        posts.sort_by(|left, right| {
+            right
+                .saved_at_ms
+                .cmp(&left.saved_at_ms)
+                .then_with(|| left.reel.id.cmp(&right.reel.id))
+        });
+        Ok(posts)
     }
 
     fn public_profile(
@@ -868,6 +950,52 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn saves_are_account_private_idempotent_and_recheck_access() {
+        let store = MemoryStore::default();
+        let owner = profile(&store);
+        let viewer = store
+            .create_profile(NewProfile {
+                handle: "saver".into(),
+                display_name: "Saver".into(),
+                bio: String::new(),
+                privacy: ProfilePrivacy::default(),
+                created_at_ms: 1,
+            })
+            .unwrap();
+        let reel = store
+            .publish_reel(
+                owner.id,
+                NewReel {
+                    profile_id: owner.id,
+                    caption: "save me".into(),
+                    media_url: "https://media.test/reel.mp4".into(),
+                    poster_url: None,
+                    duration_ms: 10,
+                    visibility: Visibility::Public,
+                    published_at_ms: 2,
+                },
+            )
+            .unwrap();
+        let account = Uuid::new_v4();
+        let first = store.save_post(account, viewer.id, reel.id, 10).unwrap();
+        let retry = store.save_post(account, viewer.id, reel.id, 20).unwrap();
+        assert_eq!(first.saved_at_ms, 10);
+        assert_eq!(retry, first);
+        assert!(
+            store
+                .saved_posts(Uuid::new_v4(), viewer.id)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(store.saved_posts(account, viewer.id).unwrap(), vec![first]);
+
+        store.block_profile(owner.id, viewer.id).unwrap();
+        assert!(store.saved_posts(account, viewer.id).unwrap().is_empty());
+        store.unsave_post(account, reel.id).unwrap();
+        assert!(store.saved_posts(account, viewer.id).unwrap().is_empty());
     }
 
     #[test]

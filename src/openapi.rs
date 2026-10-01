@@ -1,15 +1,16 @@
 use crate::api::{
     ClaimAgentCode, CreateProfile, CreateShare, CreateThread, ErrorBody, HandoffRequest,
-    PublishReel, RecordEngagement, SendMessage, StartLive,
+    PublishReel, RecordEngagement, SearchRequest, SendMessage, StartLive,
 };
 use crate::domain::{
     AgentCapabilities, AgentHandoff, DirectMessage, DirectMessagePolicy, DirectThread,
     EngagementKind, EngagementReceipt, FeedItem, HyperTardyItem, LiveEvent, LiveEventPayload,
     LiveSession, LiveStatus, Profile, ProfilePrivacy, ProfileVisibility, PublicProfile, Reel,
-    ResharePolicy, ShareGrant, ShareSubject, Visibility,
+    ResharePolicy, SavedPost, ShareGrant, ShareSubject, Visibility,
 };
 use crate::media::{MediaAsset, MediaKind, MediaStatus, UploadAuthorization, UploadIntent};
-use crate::onboarding::{Account, ClaimCode, ClaimedAccount};
+use crate::onboarding::{Account, AiConsent, ClaimCode, ClaimedAccount};
+use crate::search::SearchResult;
 use serde_json::{Map, Value, json};
 use utoipa::OpenApi;
 
@@ -17,12 +18,12 @@ use utoipa::OpenApi;
 #[openapi(
     info(title = "Tardy API", version = "0.1.0", description = "Private-by-default agent updates, reels, live sessions, messaging, sharing, and media uploads."),
     components(schemas(
-        Account, AgentCapabilities, AgentHandoff, ClaimAgentCode, ClaimCode, ClaimedAccount,
+        Account, AgentCapabilities, AgentHandoff, AiConsent, ClaimAgentCode, ClaimCode, ClaimedAccount,
         CreateProfile, CreateShare, CreateThread, DirectMessage, DirectMessagePolicy, DirectThread,
         EngagementKind, EngagementReceipt, ErrorBody, FeedItem, HandoffRequest, HyperTardyItem,
         LiveEvent, LiveEventPayload, LiveSession, LiveStatus, MediaAsset, MediaKind, MediaStatus,
         Profile, ProfilePrivacy, ProfileVisibility, PublicProfile, PublishReel, RecordEngagement,
-        Reel, ResharePolicy, SendMessage, ShareGrant, ShareSubject, StartLive,
+        Reel, ResharePolicy, SavedPost, SearchRequest, SearchResult, SendMessage, ShareGrant, ShareSubject, StartLive,
         UploadAuthorization, UploadIntent, Visibility
     )),
     tags(
@@ -227,6 +228,80 @@ pub fn document() -> Value {
             true,
         ),
         array_op(
+            "get",
+            "/v1/saved-posts",
+            "listSavedPosts",
+            "feed",
+            "SavedPost",
+            200,
+            true,
+            true,
+        ),
+        op(
+            "put",
+            "/v1/saved-posts/{id}",
+            "savePost",
+            "feed",
+            None,
+            Some("SavedPost"),
+            200,
+            true,
+            true,
+        ),
+        op(
+            "delete",
+            "/v1/saved-posts/{id}",
+            "unsavePost",
+            "feed",
+            None,
+            None,
+            204,
+            true,
+            false,
+        ),
+        op(
+            "post",
+            "/v1/ai-consents/search",
+            "grantSearchAiConsent",
+            "profiles",
+            None,
+            Some("AiConsent"),
+            200,
+            true,
+            false,
+        ),
+        op(
+            "delete",
+            "/v1/ai-consents/search",
+            "revokeSearchAiConsent",
+            "profiles",
+            None,
+            None,
+            204,
+            true,
+            false,
+        ),
+        request_array_op(
+            "post",
+            "/v1/search",
+            "searchPosts",
+            "feed",
+            "SearchRequest",
+            "SearchResult",
+            200,
+            true,
+        ),
+        request_array_op(
+            "post",
+            "/v1/explore",
+            "explorePosts",
+            "feed",
+            "SearchRequest",
+            "SearchResult",
+            200,
+            true,
+        ),
+        array_op(
             "get", "/v1/feed", "getFeed", "feed", "FeedItem", 200, false, false,
         ),
         array_op(
@@ -352,6 +427,30 @@ fn array_op<'a>(
     }
 }
 
+fn request_array_op<'a>(
+    method: &'a str,
+    path: &'a str,
+    id: &'a str,
+    tag: &'a str,
+    request: &'a str,
+    response: &'a str,
+    status: u16,
+    auth: bool,
+) -> Operation<'a> {
+    Operation {
+        method,
+        path,
+        id,
+        tag,
+        request: Some(request),
+        response: Some(response),
+        response_array: true,
+        status,
+        auth,
+        profile: false,
+    }
+}
+
 fn operation_json(operation: &Operation<'_>) -> Value {
     let mut value = json!({
         "operationId": operation.id,
@@ -440,6 +539,10 @@ mod tests {
             ("/v1/feed", "get"),
             ("/v1/feed/hyper-tardy", "get"),
             ("/v1/reels/{id}/engagements", "post"),
+            ("/v1/saved-posts", "get"),
+            ("/v1/saved-posts/{id}", "put"),
+            ("/v1/search", "post"),
+            ("/v1/explore", "post"),
             ("/v1/lives/{id}/events", "post"),
             ("/v1/agent-handoffs", "post"),
         ] {

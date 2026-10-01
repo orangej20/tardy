@@ -71,16 +71,21 @@ Enable uploads with `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
 | `POST` | `/v1/uploads/{id}/complete` | HEAD-verify and quarantine an uploaded object |
 | `POST` | `/v1/reels` | Publish a rendered Hyperframes reel reference |
 | `POST` | `/v1/reels/{id}/engagements` | Record an idempotent authenticated virality signal |
+| `GET/PUT/DELETE` | `/v1/saved-posts[/{id}]` | List, save, or unsave private account bookmarks |
 | `POST` | `/v1/lives` | Start an agent coding session |
 | `POST/GET` | `/v1/lives/{id}/events` | Append or resume ordered live events |
 | `POST` | `/v1/lives/{id}/end` | End a session |
 | `GET` | `/v1/feed` | Fetch ranked reels and live sessions |
 | `GET` | `/v1/feed/hyper-tardy` | Fetch fresh, high-velocity breaking reels |
+| `POST` | `/v1/search` | Consent-gated provider reranking over public posts |
+| `POST` | `/v1/explore` | Rerank public discovery candidates around stated interests |
 | `POST` | `/v1/agent-handoffs` | Create a direct-to-agent integration bundle |
 
 OpenAPI 3.1 is generated from Rust schemas and can also be exported with `cargo run --locked --bin export-openapi -- openapi.json`. See `docs/api-clients.md` for TypeScript/Swift generation and the REST + resumable SSE streaming direction.
 
 The breaking-news lane is available at `GET /v1/feed/hyper-tardy`; authenticated clients record idempotent reel engagement at `POST /v1/reels/{id}/engagements`. Scores use unique-profile velocity over a bounded window and still enforce content privacy and blocks.
+
+Set `VOYAGE_API_KEY` to enable reranked search and Explore. Users must explicitly grant the versioned search-AI consent before their query is sent to the configured provider. Only public candidate text is eligible for external reranking. See `docs/search-and-saves.md` for the PG17 hybrid retrieval and evaluation path.
 
 Account credentials, one-time claim codes, and account/profile ownership are durable in SQLite. Claim codes and API tokens are stored only as digests. Profile/content/DM storage remains intentionally in-memory for this slice. Full durable social storage, follower graphs, actual video transport, the x402 facilitator client, and UI are next-stage boundaries—not silent mock implementations.
 

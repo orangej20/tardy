@@ -1,7 +1,5 @@
 use async_trait::async_trait;
-use aws_sdk_s3::config::{Credentials, Region};
-use aws_sdk_s3::presigning::PresigningConfig;
-use aws_sdk_s3::types::ChecksumMode;
+use rusty_s3::{Bucket, Credentials, S3Action, UrlStyle};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, RwLock};
@@ -141,8 +139,9 @@ pub trait ObjectStore: Send + Sync {
 }
 
 pub struct R2ObjectStore {
-    client: aws_sdk_s3::Client,
-    bucket: String,
+    bucket: Bucket,
+    credentials: Credentials,
+    client: reqwest::Client,
 }
 
 impl R2ObjectStore {
@@ -152,17 +151,19 @@ impl R2ObjectStore {
         };
         let access_key = std::env::var("R2_ACCESS_KEY_ID").map_err(|_| MediaError::Unconfigured)?;
         let secret = std::env::var("R2_SECRET_ACCESS_KEY").map_err(|_| MediaError::Unconfigured)?;
-        let bucket = std::env::var("R2_BUCKET").map_err(|_| MediaError::Unconfigured)?;
-        let config = aws_sdk_s3::Config::builder()
-            .behavior_version_latest()
-            .credentials_provider(Credentials::new(access_key, secret, None, None, "tardy-r2"))
-            .region(Region::new("auto"))
-            .endpoint_url(format!("https://{account_id}.r2.cloudflarestorage.com"))
-            .force_path_style(true)
-            .build();
+        let bucket_name = std::env::var("R2_BUCKET").map_err(|_| MediaError::Unconfigured)?;
+        let endpoint = format!("https://{account_id}.r2.cloudflarestorage.com")
+            .parse()
+            .map_err(|error| MediaError::ObjectStore(format!("invalid R2 endpoint: {error}")))?;
+        let bucket = Bucket::new(endpoint, UrlStyle::Path, bucket_name, "auto")
+            .map_err(|error| MediaError::ObjectStore(format!("invalid R2 bucket: {error}")))?;
         Ok(Some(Self {
-            client: aws_sdk_s3::Client::from_conf(config),
             bucket,
+            credentials: Credentials::new(access_key, secret),
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .map_err(|error| MediaError::ObjectStore(error.to_string()))?,
         }))
     }
 }
@@ -177,54 +178,55 @@ impl ObjectStore for R2ObjectStore {
         sha256_base64: Option<&str>,
         expires: Duration,
     ) -> Result<(String, String, BTreeMap<String, String>), MediaError> {
-        let length: i64 = byte_length
-            .try_into()
-            .map_err(|_| MediaError::InvalidSize(byte_length))?;
-        let mut request = self
-            .client
-            .put_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .content_type(content_type)
-            .content_length(length);
+        let mut action = self.bucket.put_object(Some(&self.credentials), key);
+        action.headers_mut().insert("content-type", content_type);
+        let length = byte_length.to_string();
+        action.headers_mut().insert("content-length", &length);
         if let Some(checksum) = sha256_base64 {
-            request = request.checksum_sha256(checksum);
+            action
+                .headers_mut()
+                .insert("x-amz-checksum-sha256", checksum);
         }
-        let signed = request
-            .presigned(
-                PresigningConfig::expires_in(expires)
-                    .map_err(|error| MediaError::ObjectStore(error.to_string()))?,
-            )
-            .await
-            .map_err(|error| MediaError::ObjectStore(error.to_string()))?;
-        Ok((
-            signed.method().into(),
-            signed.uri().into(),
-            signed
-                .headers()
-                .map(|(name, value)| (name.into(), value.into()))
-                .collect(),
-        ))
+        let headers = action
+            .headers_mut()
+            .iter()
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect();
+        Ok(("PUT".into(), action.sign(expires).into(), headers))
     }
 
     async fn head(&self, key: &str) -> Result<ObjectMetadata, MediaError> {
+        let mut action = self.bucket.head_object(Some(&self.credentials), key);
+        action
+            .headers_mut()
+            .insert("x-amz-checksum-mode", "ENABLED");
+        let url = action.sign(Duration::from_secs(60));
         let value = self
             .client
-            .head_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .checksum_mode(ChecksumMode::Enabled)
+            .head(url)
+            .header("x-amz-checksum-mode", "ENABLED")
             .send()
             .await
             .map_err(|error| MediaError::ObjectStore(error.to_string()))?;
+        if !value.status().is_success() {
+            return Err(MediaError::ObjectStore(format!("HTTP {}", value.status())));
+        }
+        let headers = value.headers();
         Ok(ObjectMetadata {
-            content_type: value.content_type().map(str::to_owned),
-            byte_length: value
-                .content_length()
-                .unwrap_or_default()
-                .try_into()
+            content_type: headers
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            byte_length: headers
+                .get(reqwest::header::CONTENT_LENGTH)
+                .and_then(|value| value.to_str().ok())
+                .ok_or(MediaError::MetadataMismatch)?
+                .parse()
                 .map_err(|_| MediaError::MetadataMismatch)?,
-            sha256_base64: value.checksum_sha256().map(str::to_owned),
+            sha256_base64: headers
+                .get("x-amz-checksum-sha256")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
         })
     }
 }
@@ -444,17 +446,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn aws_adapter_presigns_an_r2_put_without_network_io() {
-        let config = aws_sdk_s3::Config::builder()
-            .behavior_version_latest()
-            .credentials_provider(Credentials::new("access", "secret", None, None, "test"))
-            .region(Region::new("auto"))
-            .endpoint_url("https://account.r2.cloudflarestorage.com")
-            .force_path_style(true)
-            .build();
+    async fn r2_adapter_presigns_a_put_without_network_io() {
         let store = R2ObjectStore {
-            client: aws_sdk_s3::Client::from_conf(config),
-            bucket: "media".into(),
+            bucket: Bucket::new(
+                "https://account.r2.cloudflarestorage.com".parse().unwrap(),
+                UrlStyle::Path,
+                "media",
+                "auto",
+            )
+            .unwrap(),
+            credentials: Credentials::new("access", "secret"),
+            client: reqwest::Client::new(),
         };
         let (method, url, headers) = store
             .presign_put(

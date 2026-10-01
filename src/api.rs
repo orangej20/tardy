@@ -6,11 +6,12 @@ use crate::media::{MediaError, MediaService, UploadIntent};
 use crate::metrics::Metrics;
 use crate::onboarding::{AccountRegistry, OnboardingError};
 use crate::ranking::LuaRanker;
+use crate::search::{SearchError, SearchService};
 use crate::store::{MemoryStore, NewLive, NewProfile, NewReel, Store, StoreError};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router, middleware};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -25,6 +26,7 @@ pub struct AppState {
     pub accounts: Arc<AccountRegistry>,
     pub metrics: Arc<Metrics>,
     pub media: Arc<MediaService>,
+    pub search: Arc<SearchService>,
 }
 
 impl AppState {
@@ -38,6 +40,7 @@ impl AppState {
             accounts: Arc::new(AccountRegistry::in_memory().expect("in-memory account registry")),
             metrics: Arc::new(Metrics::new()),
             media: Arc::new(MediaService::new(None)),
+            search: Arc::new(SearchService::disabled()),
         })
     }
 
@@ -52,6 +55,7 @@ impl AppState {
             accounts: Arc::new(AccountRegistry::open(path)?),
             metrics: Arc::new(Metrics::new()),
             media: Arc::new(MediaService::from_env()?),
+            search: Arc::new(SearchService::from_env()?),
         })
     }
 }
@@ -81,6 +85,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/uploads/{id}/complete", post(complete_upload))
         .route("/v1/reels", post(publish_reel))
         .route("/v1/reels/{id}/engagements", post(record_engagement))
+        .route("/v1/saved-posts", get(list_saved_posts))
+        .route("/v1/saved-posts/{id}", put(save_post).delete(unsave_post))
+        .route(
+            "/v1/ai-consents/search",
+            post(grant_search_consent).delete(revoke_search_consent),
+        )
+        .route("/v1/search", post(search_posts))
+        .route("/v1/explore", post(explore_posts))
         .route("/v1/lives", post(start_live))
         .route("/v1/lives/{id}/events", post(append_event).get(list_events))
         .route("/v1/lives/{id}/end", post(end_live))
@@ -181,6 +193,127 @@ async fn record_engagement(
             now_ms()?,
         )?),
     ))
+}
+
+async fn save_post(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    let account_id = authenticated_account(&state, &headers)?;
+    let viewer_id = authenticated_actor(&state, &headers)?;
+    Ok(Json(state.store.save_post(
+        account_id,
+        viewer_id,
+        id,
+        now_ms()?,
+    )?))
+}
+
+async fn unsave_post(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .store
+        .unsave_post(authenticated_account(&state, &headers)?, id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_saved_posts(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    let account_id = authenticated_account(&state, &headers)?;
+    let viewer_id = authenticated_actor(&state, &headers)?;
+    Ok(Json(state.store.saved_posts(account_id, viewer_id)?))
+}
+
+const SEARCH_CONSENT_PURPOSE: &str = "search_reranking";
+const SEARCH_CONSENT_POLICY: &str = "search-v1";
+
+async fn grant_search_consent(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    let account_id = authenticated_account(&state, &headers)?;
+    let provider = state.search.provider().ok_or(SearchError::Unavailable)?;
+    Ok(Json(state.accounts.grant_ai_consent(
+        account_id,
+        provider,
+        SEARCH_CONSENT_PURPOSE,
+        SEARCH_CONSENT_POLICY,
+        now_ms()?,
+    )?))
+}
+
+async fn revoke_search_consent(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    let account_id = authenticated_account(&state, &headers)?;
+    if let Some(provider) = state.search.provider() {
+        state.accounts.revoke_ai_consent(
+            account_id,
+            provider,
+            SEARCH_CONSENT_PURPOSE,
+            now_ms()?,
+        )?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SearchRequest {
+    query: String,
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+
+async fn search_posts(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<SearchRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    run_search(&state, &headers, &body.query, body.limit).await
+}
+
+async fn explore_posts(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<SearchRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let query = format!(
+        "Find timely, substantive open-source and AI project updates about: {}",
+        body.query
+    );
+    run_search(&state, &headers, &query, body.limit).await
+}
+
+async fn run_search(
+    state: &AppState,
+    headers: &HeaderMap,
+    query: &str,
+    limit: usize,
+) -> Result<Json<Vec<crate::search::SearchResult>>, ApiError> {
+    if !(1..=50).contains(&limit) {
+        return Err(ApiError::bad_request("limit must be between 1 and 50"));
+    }
+    let account_id = authenticated_account(state, headers)?;
+    let provider = state.search.provider().ok_or(SearchError::Unavailable)?;
+    if !state.accounts.has_ai_consent(
+        account_id,
+        provider,
+        SEARCH_CONSENT_PURPOSE,
+        SEARCH_CONSENT_POLICY,
+    )? {
+        return Err(ApiError::forbidden(
+            "explicit search AI consent is required",
+        ));
+    }
+    let candidates = state.store.feed_candidates(None)?;
+    Ok(Json(state.search.search(query, candidates, limit).await?))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -781,13 +914,53 @@ impl From<crate::ranking::RankingError> for ApiError {
     }
 }
 
+impl From<SearchError> for ApiError {
+    fn from(value: SearchError) -> Self {
+        match value {
+            SearchError::Unavailable => Self {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                message: value.to_string(),
+            },
+            SearchError::EmptyQuery => Self::bad_request(value.to_string()),
+            SearchError::Provider(_) | SearchError::InvalidResult => Self {
+                status: StatusCode::BAD_GATEWAY,
+                message: value.to_string(),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::search::{RankedDocument, Reranker, SearchDocument};
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, header::CONTENT_TYPE};
     use serde_json::{Value, json};
     use tower::ServiceExt;
+
+    struct TestReranker;
+
+    #[async_trait::async_trait]
+    impl Reranker for TestReranker {
+        fn provider(&self) -> &'static str {
+            "test-provider"
+        }
+
+        async fn rerank(
+            &self,
+            _query: &str,
+            documents: &[SearchDocument],
+            limit: usize,
+        ) -> Result<Vec<RankedDocument>, SearchError> {
+            Ok((0..documents.len().min(limit))
+                .map(|index| RankedDocument {
+                    index,
+                    score: 1.0 - index as f64 / 100.0,
+                })
+                .collect())
+        }
+    }
 
     async fn request(
         app: &Router,
@@ -834,6 +1007,116 @@ mod tests {
             document["paths"]["/v1/uploads"]["post"]["operationId"],
             "authorizeUpload"
         );
+    }
+
+    #[tokio::test]
+    async fn saved_posts_are_private_and_search_requires_revocable_consent() {
+        let mut state = AppState::in_memory("https://tardy.test").unwrap();
+        state.search = Arc::new(SearchService::with_reranker(Arc::new(TestReranker)));
+        let state = Arc::new(state);
+        let ticket = state.accounts.issue_claim(1).unwrap();
+        let claimed = state
+            .accounts
+            .claim(&ticket.code, "reader@example.com", 2)
+            .unwrap();
+        let token = claimed.api_token;
+        let profile = state
+            .store
+            .create_profile(NewProfile {
+                handle: "reader".into(),
+                display_name: "Reader".into(),
+                bio: String::new(),
+                privacy: ProfilePrivacy::default(),
+                created_at_ms: 3,
+            })
+            .unwrap();
+        state
+            .accounts
+            .bind_profile(claimed.account.id, profile.id)
+            .unwrap();
+        let reel = state
+            .store
+            .publish_reel(
+                profile.id,
+                NewReel {
+                    profile_id: profile.id,
+                    caption: "Rust search".into(),
+                    media_url: "https://media.test/reel.mp4".into(),
+                    poster_url: None,
+                    duration_ms: 10,
+                    visibility: Visibility::Public,
+                    published_at_ms: 4,
+                },
+            )
+            .unwrap();
+        let app = router(state);
+        let profile_id = profile.id.to_string();
+
+        let (status, saved) = request(
+            &app,
+            "PUT",
+            &format!("/v1/saved-posts/{}", reel.id),
+            Value::Null,
+            Some(&profile_id),
+            Some(&token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(saved["reel"]["id"], reel.id.to_string());
+
+        let (status, _) = request(
+            &app,
+            "POST",
+            "/v1/search",
+            json!({"query":"Rust", "limit":10}),
+            None,
+            Some(&token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, _) = request(
+            &app,
+            "POST",
+            "/v1/ai-consents/search",
+            Value::Null,
+            None,
+            Some(&token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, results) = request(
+            &app,
+            "POST",
+            "/v1/search",
+            json!({"query":"Rust", "limit":10}),
+            None,
+            Some(&token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(results[0]["item"]["id"], reel.id.to_string());
+
+        let (status, _) = request(
+            &app,
+            "DELETE",
+            "/v1/ai-consents/search",
+            Value::Null,
+            None,
+            Some(&token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, _) = request(
+            &app,
+            "POST",
+            "/v1/search",
+            json!({"query":"Rust", "limit":10}),
+            None,
+            Some(&token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
