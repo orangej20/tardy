@@ -1,34 +1,12 @@
-# Hyperframes Composition Brief: tardy, "Open in Tardy"
+# Hyperframes Composition Brief: tardy, "Open in Tardy" (keynote cut)
 
-## Objective
-A 22s vertical movie-trailer launch reel for PR #16 (iOS share extension), per `/tardy-launch`.
-
-## Output
-- Composition: `composition/` · Video: `brag.mp4` · 1080x1920, 30fps, 22.0s
-
-## Source material
-- PR #16 body and commits (`7526b47`, merge `73bdafb`); claims and sources in `facts.md`.
-- Real app take: `composition/assets/reveal.mp4`, recorded from the standalone simulator build
-  (`xcrun simctl io booted recordVideo`), Safari → Share → Tardy → Your agents → Send → ✓ Sent.
-- Wordmark: `composition/assets/wordmark.png`, cropped from an app screenshot (Home header).
-- Copy that appears verbatim: "Open in Tardy" (`iosShareExtensionName`), "Real followers, real
-  friends. Stay Tardy." (`docs/brand/BRAND.md`).
-
-## Creative direction
-cinematic; "blockbuster trailer for a pull request: dead serious about something small". Storyboard,
-beats, safe zones and limits pushed: `brag-plan.md`.
-
-## Visual identity
-`mobile/src/theme/index.ts`: bg #0A0A0D, surface #15151B, text #F7F7FA, textSecondary #A1A1AE,
-textTertiary #80808C, primary #FFC21A. Trailer caps in Avenir Next Condensed (macOS system font,
-loaded with `local()`, not shipped).
-
-## Audio
-Original score synthesized by `composition/build-audio.sh` (sub hits, riser, braam, drone), plus
-CC0 Kenney click/bell SFX from brag's library. Silence beat 7.4–7.75s before the reveal.
-
-## Implementation notes
-- `device-frame-stage` (registry) holds the take; local edits: video in the slot, viewport fills the
-  screen, duration 7.25s. `grain-overlay` (registry) inlined with seekable stepped jitter instead
-  of an infinite CSS animation.
-- Letterbox hand-built (no catalog match; gap reported).
+- Composition `composition/`, video `brag.mp4`: 1080x1920, 30fps, 20.0s.
+- Creative contract: `brag-plan.md`. Claims and sources: `facts.md`.
+- Real take: `composition/assets/reveal.mp4`, from `xcrun simctl io booted recordVideo` of the
+  standalone simulator build, Safari on github.com/ajmwagar/tardy/pull/16 → Share → Tardy →
+  opus.backend → Send, cut to three beats with ffmpeg (5.3s).
+- Assets: `app-icon.png` (copy of `mobile/assets/images/icon.png`), `wordmark.png` (cropped from an
+  app screenshot), `agent-opus.png` / `agent-sonnet.png` (cropped from the take).
+- Registry: `device-frame-stage` (local edits: video in the slot, viewport fills the screen, black
+  screen before the take, duration 5.65s).
+- Audio: `build-audio.sh` writes `assets/score/music.wav`; CC0 clicks in `assets/sfx/`.

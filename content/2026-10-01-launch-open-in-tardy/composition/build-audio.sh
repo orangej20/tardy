@@ -1,28 +1,32 @@
 #!/usr/bin/env bash
-# Synthesizes the reel's original trailer score with ffmpeg: no samples, no licensed music.
-# Deterministic: rerun to rebuild every file in assets/score/. Timing lives in index.html.
+# Synthesizes the reel's original music bed with ffmpeg: no samples, no licensed music.
+# 120 BPM (beat = 0.5s), A major add9 arpeggio over A / F#m / D / E, kick and hats from the
+# drop at 4.0s, a noise riser into the drop, fade over the last second. Deterministic: rerun
+# to rebuild assets/score/music.wav. Cut points in index.html sit on this grid.
 set -euo pipefail
 cd "$(dirname "$0")"
 out=assets/score
 mkdir -p "$out"
+rm -f "$out"/*.wav
 sr=48000
-gen() { ffmpeg -v error -y -f lavfi -i "aevalsrc=exprs='$2':s=$sr:d=$3" "${@:4}" -ac 2 "$out/$1.wav"; }
+dur=20
 
-# Sub hit: a pitch-dropping boom (90 -> 35 Hz) with a short noise transient.
-gen hit '0.95*sin(2*PI*(35*t+(55/6)*(1-exp(-6*t))))*exp(-2.6*t)+0.35*(random(0)*2-1)*exp(-35*t)' 1.8 \
-  -af 'lowpass=f=2400,volume=1.4'
+# Chord root (semitones from A) changes every 2 bars (4s): A, F#, D, E.
+root='if(eq(mod(floor(t/4),4),0),0,if(eq(mod(floor(t/4),4),1),-3,if(eq(mod(floor(t/4),4),2),-7,-5)))'
+# Arp step pattern (8ths), no thirds so it fits every chord: 0 7 12 14 19 14 12 7.
+step='mod(floor(t/0.25),8)'
+semi="if(eq($step,0),0,if(eq($step,1),7,if(eq($step,2),12,if(eq($step,3),14,if(eq($step,4),19,if(eq($step,5),14,if(eq($step,6),12,7)))))))"
+k='mod(t,0.5)'   # time since the last beat
+drop='gte(t,4)*lt(t,19)'
 
-# Riser: a sine sweep 180 -> 1400 Hz plus noise, both swelling to a hard stop.
-gen riser '(0.35*sin(2*PI*(180*t+(1220/3.6)*t*t))+0.25*(random(0)*2-1))*pow(t/1.8,2.2)' 1.8 \
-  -af 'highpass=f=150,volume=1.2'
+arp="0.16*sin(2*PI*220*pow(2,($root+$semi)/12)*t)*exp(-11*mod(t,0.25))"
+pad="0.07*(sin(2*PI*110*pow(2,$root/12)*t)+0.7*sin(2*PI*165*pow(2,$root/12)*t)+0.5*sin(2*PI*246.9*pow(2,$root/12)*t))*min(mod(t,4)/0.6,1)"
+kick="$drop*0.9*sin(2*PI*(45*$k+(110/18)*(1-exp(-18*$k))))*exp(-9*$k)"
+sub="$drop*0.22*sin(2*PI*55*pow(2,$root/12)*t)*(1-0.75*exp(-7*$k))"
+hats="$drop*0.07*(random(0)*2-1)*exp(-70*mod(t-0.25,0.5))"
+riser="between(t,2.6,3.98)*0.14*(random(1)*2-1)*pow(max(t-2.6,0)/1.4,2.5)"
+fade="min(1,max(0,(20-t)/1.0))"
 
-# Braam: a detuned, saw-like brass stack (A1, E2, A2) through a low-pass, hard attack, long decay.
-saw() { local f=$1 e=""; for k in 1 2 3 4 5 6 7 8; do e+="+sin(2*PI*$k*$f*t)/$k"; done; echo "(0$e)"; }
-gen braam "0.22*($(saw 55)+$(saw 55.4)+0.8*$(saw 82.4)+0.6*$(saw 110.3))*min(t/0.04,1)*exp(-0.75*t)" 3.6 \
-  -af 'lowpass=f=950,acompressor=threshold=-14dB:ratio=3,volume=1.1'
-
-# Drone: E1/B1/E2 sines with a slow swell, under the whole reel (the timeline gates its level).
-gen drone '(0.5*sin(2*PI*41.2*t)+0.35*sin(2*PI*61.7*t)+0.25*sin(2*PI*82.4*t))*(0.8+0.2*sin(2*PI*0.25*t))' 23 \
-  -af 'volume=0.9'
-
+ffmpeg -v error -y -f lavfi -i "aevalsrc=exprs='($arp+$pad+$kick+$sub+$hats+$riser)*$fade':s=$sr:d=$dur" \
+  -af 'acompressor=threshold=-16dB:ratio=3:attack=5:release=120,alimiter=limit=0.89' -ac 2 "$out/music.wav"
 ls -la "$out"

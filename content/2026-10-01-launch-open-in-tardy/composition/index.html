@@ -3,29 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=1080, height=1920" />
-    <title>Open in Tardy: launch trailer</title>
+    <title>Open in Tardy: keynote launch</title>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
     <style>
-      /* Trailer caps: Avenir Next Condensed Heavy, a macOS system font, loaded by name (not shipped). */
-      @font-face {
-        font-family: "Trailer";
-        src: local("AvenirNextCondensed-Heavy"), local("Avenir Next Condensed Heavy");
-        font-weight: 800;
-      }
-      @font-face {
-        font-family: "TrailerLight";
-        src: local("AvenirNextCondensed-Medium"), local("Avenir Next Condensed Medium");
-        font-weight: 500;
-      }
-      /* Palette: mobile/src/theme/index.ts (bg, surface, text, textSecondary, textTertiary, primary). */
+      /* Palette: mobile/src/theme/index.ts. Type: system-ui (SF Pro on the macOS renderer). */
       :root {
         --bg: #0a0a0d;
         --surface: #15151b;
+        --separator: #26262f;
         --text: #f7f7fa;
         --text-2: #a1a1ae;
-        --text-3: #80808c;
         --primary: #ffc21a;
-        --bar: #000000;
+        --on-primary: #14110a;
       }
       * {
         margin: 0;
@@ -46,209 +35,292 @@
         overflow: hidden;
         background: var(--bg);
         color: var(--text);
-        font-family: "Trailer", system-ui, sans-serif;
+        font-family: system-ui, -apple-system, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      /* Aurora: two soft blobs that drift and breathe on the beat. */
+      #aurora {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+      }
+      .blob {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(120px);
+      }
+      #blob-a {
+        left: 140px;
+        top: 520px;
+        width: 800px;
+        height: 800px;
+        background: radial-gradient(circle, rgba(255, 194, 26, 0.34) 0%, rgba(255, 194, 26, 0) 70%);
+      }
+      #blob-b {
+        left: 380px;
+        top: 900px;
+        width: 620px;
+        height: 620px;
+        background: radial-gradient(circle, rgba(247, 247, 250, 0.1) 0%, rgba(247, 247, 250, 0) 70%);
       }
       .scene {
         position: absolute;
         inset: 0;
       }
-      /* Key text lives in the feed-safe column: x 190-890 keeps clear of the action rail. */
-      .card {
+      /* Key text stays in the feed-safe column x 190-890, y 220-1440. */
+      .col {
         position: absolute;
         left: 190px;
         width: 700px;
-        top: 734px;
-        height: 452px;
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
         text-align: center;
       }
-      .caps {
-        font-family: "Trailer", system-ui, sans-serif;
+      .h1 {
         font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        line-height: 0.98;
+        letter-spacing: -0.04em;
+        line-height: 1.02;
       }
-      .card .caps {
+      .word {
+        display: inline-block;
+        margin-right: 0.22em;
+      }
+      .word:last-child {
+        margin-right: 0;
+      }
+      .grad {
+        background: linear-gradient(100deg, var(--primary) 20%, var(--text) 120%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      #hook {
+        top: 640px;
+        height: 520px;
+        justify-content: center;
+      }
+      #hook .h1 {
+        font-size: 92px;
+      }
+      #intro-wrap {
+        top: 520px;
+        height: 820px;
+        justify-content: center;
+      }
+      .kicker {
+        font-size: 42px;
+        font-weight: 600;
+        color: var(--text-2);
+        letter-spacing: -0.01em;
+      }
+      .icon {
+        display: block;
+        border-radius: 22.5%;
+        box-shadow: 0 30px 120px rgba(255, 194, 26, 0.35), 0 0 0 1px rgba(247, 247, 250, 0.08);
+      }
+      #intro-icon {
+        width: 280px;
+        height: 280px;
+        margin: 44px 0 48px;
+      }
+      #intro-title {
         font-size: 104px;
       }
-      #cold .caps {
-        font-size: 74px;
-        white-space: nowrap;
-      }
-      #cold .kicker {
-        margin-top: 28px;
-        font-family: "TrailerLight", system-ui, sans-serif;
-        font-size: 34px;
-        letter-spacing: 0.32em;
-        color: var(--text-2);
-        text-transform: uppercase;
-      }
-      /* The picture band between the bars. */
-      #band {
-        position: absolute;
-        left: 0;
-        right: 0;
-        top: 734px;
-        height: 452px;
-        background: radial-gradient(ellipse at 50% 50%, var(--surface) 0%, var(--bg) 75%);
-      }
-      #bar-top,
-      #bar-bot {
-        position: absolute;
-        left: 0;
-        right: 0;
-        height: 734px;
-        background: var(--bar);
-      }
-      #bar-top {
-        top: 0;
-      }
-      #bar-bot {
-        bottom: 0;
-      }
-      #diff {
-        position: absolute;
-        left: 70px;
-        top: 760px;
-        width: 820px;
-        height: 400px;
-        overflow: hidden;
-        font-family: monospace;
-        font-size: 25px;
-        line-height: 1.32;
-        color: var(--text-3);
-        white-space: pre;
-        opacity: 0.55;
-      }
-      #diff .file {
-        color: var(--text-2);
-      }
-      /* Reveal */
+      /* Demo */
       #dev-wrap {
         position: absolute;
         left: 0;
         top: 90px;
         width: 1080px;
         height: 1240px;
-        transform-origin: 595px 904px;
+        transform-origin: 595px 1136px;
       }
       #dev-host {
         position: absolute;
         inset: 0;
       }
-      #label-scrim {
+      #cap-scrim {
         position: absolute;
         left: 0;
         right: 0;
         top: 0;
-        height: 400px;
-        background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 70%, rgba(10, 10, 13, 0) 100%);
+        height: 540px;
+        background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 72%, rgba(10, 10, 13, 0) 100%);
       }
-      .label {
+      .cap {
         position: absolute;
         left: 190px;
         width: 700px;
-        top: 232px;
-        height: 90px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 66px;
-        text-align: center;
-      }
-      .label em {
-        font-style: normal;
-        color: var(--primary);
-      }
-      /* Title */
-      #title-wrap {
-        position: absolute;
-        left: 190px;
-        width: 700px;
-        top: 470px;
-        height: 960px;
+        top: 228px;
+        height: 150px;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         text-align: center;
+        font-size: 60px;
+        font-weight: 750;
+        letter-spacing: -0.035em;
+        line-height: 1.08;
       }
-      #title-a {
-        font-size: 150px;
-        color: var(--primary);
-        letter-spacing: 0.06em;
-      }
-      #title-b {
-        font-size: 268px;
-        color: var(--primary);
-        letter-spacing: 0.02em;
-        line-height: 0.9;
-      }
-      #release {
-        margin-top: 34px;
-        font-size: 50px;
-        letter-spacing: 0.24em;
-        color: var(--text);
-      }
-      #billing {
-        margin-top: 64px;
-        font-family: "TrailerLight", system-ui, sans-serif;
-        font-weight: 500;
-        font-size: 30px;
-        line-height: 1.5;
-        letter-spacing: 0.14em;
+      .cap .dim {
         color: var(--text-2);
-        text-transform: uppercase;
       }
-      #billing b {
-        font-family: "Trailer", system-ui, sans-serif;
-        font-weight: 800;
-        color: var(--text);
-      }
-      /* Tag */
-      #tag-wrap {
+      #toast {
         position: absolute;
-        left: 190px;
-        width: 700px;
-        top: 620px;
-        height: 700px;
+        left: 290px;
+        width: 500px;
+        top: 1180px;
+        height: 96px;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        text-align: center;
-        font-family: system-ui, sans-serif;
-      }
-      #tag-line {
-        font-size: 58px;
+        gap: 14px;
+        border-radius: 999px;
+        background: var(--primary);
+        color: var(--on-primary);
+        font-size: 38px;
         font-weight: 800;
-        line-height: 1.15;
-        color: var(--text);
+        letter-spacing: -0.02em;
+        box-shadow: 0 20px 60px rgba(255, 194, 26, 0.35);
       }
-      #tag-stay {
+      /* Bento */
+      #bento-kicker {
+        top: 270px;
+        height: 80px;
+        justify-content: center;
+      }
+      .card {
+        position: absolute;
+        border-radius: 40px;
+        background: linear-gradient(160deg, var(--surface) 0%, var(--bg) 100%);
+        border: 1px solid var(--separator);
+        padding: 34px 34px 30px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        overflow: hidden;
+      }
+      .card .big {
+        font-size: 150px;
+        font-weight: 800;
+        letter-spacing: -0.05em;
+        line-height: 0.95;
+      }
+      .card .mid {
+        font-size: 64px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        line-height: 1;
+      }
+      .card .lbl {
+        margin-top: 12px;
+        font-size: 34px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        line-height: 1.12;
+      }
+      .card .sub {
+        margin-top: 8px;
+        font-size: 26px;
+        font-weight: 500;
+        color: var(--text-2);
+        line-height: 1.25;
+      }
+      #card-a {
+        left: 190px;
+        top: 380px;
+        width: 340px;
+        height: 420px;
+      }
+      #card-b {
+        left: 550px;
+        top: 380px;
+        width: 340px;
+        height: 420px;
+      }
+      #card-c {
+        left: 190px;
+        top: 820px;
+        width: 340px;
+        height: 300px;
+      }
+      #card-d {
+        left: 550px;
+        top: 820px;
+        width: 340px;
+        height: 300px;
+      }
+      #card-e {
+        left: 190px;
+        top: 1140px;
+        width: 700px;
+        height: 200px;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 40px;
+      }
+      #card-e .mid {
+        font-size: 56px;
+      }
+      #card-e .sub {
+        margin: 0;
+        text-align: right;
+      }
+      .plus {
+        color: var(--primary);
+      }
+      .agents {
+        display: flex;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+      .agents img {
+        width: 96px;
+        height: 96px;
+        border-radius: 26px;
+      }
+      /* End card */
+      #end-wrap {
+        top: 300px;
+        height: 1120px;
+        justify-content: center;
+      }
+      #end-icon {
+        width: 240px;
+        height: 240px;
+        margin-bottom: 50px;
+      }
+      #end-title {
+        font-size: 100px;
+      }
+      #end-sub {
         margin-top: 18px;
-        font-size: 70px;
-        font-weight: 900;
+        font-size: 40px;
+        font-weight: 600;
+        color: var(--text-2);
+        letter-spacing: -0.01em;
+      }
+      #end-sign {
+        margin-top: 90px;
+        font-size: 44px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      #end-stay {
+        margin-top: 8px;
+        font-size: 60px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
         color: var(--primary);
       }
       #wordmark {
         display: block;
-        margin-top: 70px;
-        width: 450px;
-        height: 165px;
-      }
-      #grain-overlay .grain-texture {
-        position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-        opacity: 0.16;
+        margin-top: 44px;
+        width: 330px;
+        height: 121px;
       }
     </style>
   </head>
@@ -257,195 +329,161 @@
       id="root"
       data-composition-id="main"
       data-start="0"
-      data-duration="22"
+      data-duration="20"
       data-width="1080"
       data-height="1920"
       data-fps="30"
     >
-      <!-- 1. Cold open: the stakes, in five words -->
-      <section id="cold" class="scene clip" data-start="0" data-duration="2" data-track-index="1">
-        <div class="card">
-          <div id="cold-a" class="caps">The share row</div>
-          <div id="cold-b" class="caps">was incomplete.</div>
-          <div id="cold-k" class="kicker">iOS · Safari · Every link</div>
+      <div id="aurora">
+        <div id="blob-a" class="blob"></div>
+        <div id="blob-b" class="blob"></div>
+      </div>
+
+      <!-- 1. Hook (0-2.5): blur-in words -->
+      <section id="s-hook" class="scene clip" data-start="0" data-duration="2.5" data-track-index="1">
+        <div id="hook" class="col">
+          <div class="h1"><span class="word">Share</span><span class="word">any</span><span class="word">link</span></div>
+          <div class="h1"><span class="word">to</span><span class="word">your</span><span class="word grad">agents.</span></div>
         </div>
       </section>
 
-      <!-- 2. The build: letterboxed cards on the hits -->
-      <div id="band" class="clip" data-start="2" data-duration="5.75" data-track-index="2"></div>
-      <pre id="diff" class="clip" data-layout-allow-overlap data-start="5.6" data-duration="1.8" data-track-index="3"></pre>
-      <section id="b1" class="scene clip" data-start="2" data-duration="1.8" data-track-index="4">
-        <div class="card"><div class="caps">This fall…</div></div>
-      </section>
-      <section id="b2" class="scene clip" data-start="3.8" data-duration="1.8" data-track-index="4">
-        <div class="card"><div class="caps">One dev.</div><div class="caps">One agent…</div></div>
-      </section>
-      <section id="b3" class="scene clip" data-start="5.6" data-duration="1.8" data-track-index="4">
-        <div class="card"><div class="caps">Zero lines</div><div class="caps">of Swift…</div></div>
+      <!-- 2. Introducing (2.5-4.5) -->
+      <section id="s-intro" class="scene clip" data-start="2.5" data-duration="2" data-track-index="1">
+        <div id="intro-wrap" class="col">
+          <div id="intro-kicker" class="kicker">Introducing</div>
+          <img id="intro-icon" class="icon" src="assets/app-icon.png" alt="" />
+          <div id="intro-title" class="h1 grad">Open in Tardy</div>
+        </div>
       </section>
 
-      <!-- 3. The reveal: the real take on a standalone simulator build -->
+      <!-- 3. Demo (4.5-10.15): the real take, standalone simulator build -->
       <div id="dev-wrap">
         <div
           id="dev-host"
           data-composition-id="device-frame-stage"
           data-composition-src="compositions/components/device-frame-stage.html"
-          data-start="7.75"
-          data-duration="7.25"
-          data-track-index="5"
+          data-start="4.5"
+          data-duration="5.65"
+          data-track-index="2"
           data-width="1080"
           data-height="1240"
         ></div>
       </div>
-      <div id="label-scrim" class="clip" data-start="7.75" data-duration="7.25" data-track-index="6"></div>
-      <div id="l1" class="label caps clip" data-start="7.9" data-duration="2" data-track-index="6">Safari. Share.</div>
-      <div id="l2" class="label caps clip" data-start="9.9" data-duration="1.45" data-track-index="6">
-        <span><em>Tardy</em> is in the row.</span>
+      <div id="cap-scrim" class="clip" data-start="4.5" data-duration="5.65" data-track-index="3"></div>
+      <div id="c1" class="cap clip" data-start="4.7" data-duration="2.1" data-track-index="4">
+        <div>Tap Share.</div>
+        <div class="dim">Tardy's in the row.</div>
       </div>
-      <div id="l3" class="label caps clip" data-start="11.35" data-duration="2.05" data-track-index="6">Your agents first.</div>
-      <div id="l4" class="label caps clip" data-start="13.4" data-duration="1.6" data-track-index="6">One tap. Sent.</div>
+      <div id="c2" class="cap clip" data-start="6.85" data-duration="1.6" data-track-index="4">
+        <div>Your agents,</div>
+        <div class="dim">first.</div>
+      </div>
+      <div id="c3" class="cap clip" data-start="8.5" data-duration="1.65" data-track-index="4">
+        <div>One tap.</div>
+        <div class="dim">Sent.</div>
+      </div>
+      <div id="toast" class="clip" data-start="9.5" data-duration="0.65" data-track-index="5">✓ Sent to opus.backend</div>
 
-      <!-- Letterbox bars over everything until they open on the reveal -->
-      <div id="bars" class="clip" data-start="2" data-duration="6.6" data-track-index="7">
-        <div id="bar-top"></div>
-        <div id="bar-bot"></div>
-      </div>
-      <div id="grain-overlay" class="clip" data-start="0" data-duration="8.2" data-track-index="8" style="position: absolute; inset: 0; pointer-events: none; overflow: hidden">
-        <div class="grain-texture"></div>
-      </div>
-
-      <!-- 4. Title card: the release date is the merge date -->
-      <section id="title" class="scene clip" data-start="15" data-duration="4.1" data-track-index="9">
-        <div id="title-wrap">
-          <div id="title-a" class="caps">Open in</div>
-          <div id="title-b" class="caps">Tardy</div>
-          <div id="release" class="caps">In main October 1</div>
-          <div id="billing">
-            <div>Directed by <b>orangej20</b></div>
-            <div>Written with <b>Claude Opus 5.5</b></div>
-            <div><b>10</b> files · <b>+203 −75</b> · <b>401</b> tests passing</div>
-            <div>Pull request <b>#16</b> · zero lines of Swift</div>
+      <!-- 4. Bento (10.15-15.0): real numbers from PR #16 -->
+      <section id="s-bento" class="scene clip" data-start="10.15" data-duration="4.85" data-track-index="1">
+        <div id="bento-kicker" class="col kicker">What shipped in PR #16</div>
+        <div id="card-a" class="card">
+          <div class="big grad">0</div>
+          <div class="lbl">lines of Swift.</div>
+          <div class="sub">expo-share-intent builds the extension.</div>
+        </div>
+        <div id="card-b" class="card">
+          <div class="agents">
+            <img src="assets/agent-opus.png" alt="" />
+            <img src="assets/agent-sonnet.png" alt="" />
           </div>
+          <div class="lbl">Your agents first.</div>
+          <div class="sub">One tap to send. A work chat starts.</div>
+        </div>
+        <div id="card-c" class="card">
+          <div class="mid">Any link</div>
+          <div class="sub">Safari, YouTube, any app that shares one.</div>
+        </div>
+        <div id="card-d" class="card">
+          <div class="big">401</div>
+          <div class="sub">tests passing.</div>
+        </div>
+        <div id="card-e" class="card">
+          <div class="mid"><span class="plus">+203</span> −75</div>
+          <div class="sub"><div>10 files</div><div>merged October 1</div></div>
         </div>
       </section>
 
-      <!-- 5. Tag -->
-      <section id="tag" class="scene clip" data-start="19.1" data-duration="2.9" data-track-index="9">
-        <div id="tag-wrap">
-          <div id="tag-line"><div>Real followers,</div><div>real friends.</div></div>
-          <div id="tag-stay">Stay Tardy.</div>
+      <!-- 5. End card (15-20) -->
+      <section id="s-end" class="scene clip" data-start="15" data-duration="5" data-track-index="1">
+        <div id="end-wrap" class="col">
+          <img id="end-icon" class="icon" src="assets/app-icon.png" alt="" />
+          <div id="end-title" class="h1 grad">Open in Tardy</div>
+          <div id="end-sub">Merged October 1 · iOS</div>
+          <div id="end-sign">Real followers, real friends.</div>
+          <div id="end-stay">Stay Tardy.</div>
           <img id="wordmark" src="assets/wordmark.png" alt="tardy" />
         </div>
       </section>
 
-      <!-- Score: synthesized by build-audio.sh. Silence beat 7.4-7.75 is deliberate (< 0.5s). -->
-      <audio id="drone-a" src="assets/score/drone.wav" data-start="0" data-duration="7.4" data-track-index="20" data-volume="0.55"></audio>
-      <audio
-        id="drone-b"
-        src="assets/score/drone.wav"
-        data-start="7.75"
-        data-media-start="7.75"
-        data-duration="14.25"
-        data-track-index="20"
-        data-automation='{"version":1,"lanes":[{"target":"volume","points":[{"t":0,"v":0.7},{"t":2,"v":0.4},{"t":7.25,"v":0.45},{"t":11.35,"v":0.55},{"t":14.25,"v":0.1}]}]}'
-      ></audio>
-      <audio id="hit-0" src="assets/score/hit.wav" data-start="0" data-duration="1.8" data-track-index="21" data-volume="1"></audio>
-      <audio id="hit-1" src="assets/score/hit.wav" data-start="2" data-duration="1.8" data-track-index="21" data-volume="0.9"></audio>
-      <audio id="hit-2" src="assets/score/hit.wav" data-start="3.8" data-duration="1.8" data-track-index="21" data-volume="0.95"></audio>
-      <audio id="hit-3" src="assets/score/hit.wav" data-start="5.6" data-duration="1.8" data-track-index="21" data-volume="1"></audio>
-      <audio id="riser" src="assets/score/riser.wav" data-start="5.6" data-duration="1.8" data-track-index="22" data-volume="0.9"></audio>
-      <audio id="braam-1" src="assets/score/braam.wav" data-start="7.75" data-duration="3.6" data-track-index="23" data-volume="1.6"></audio>
-      <audio id="hit-4" src="assets/score/hit.wav" data-start="7.75" data-duration="1.8" data-track-index="21" data-volume="0.8"></audio>
-      <audio id="braam-2" src="assets/score/braam.wav" data-start="15" data-duration="3.6" data-track-index="23" data-volume="1.5"></audio>
-      <audio id="bell-1" src="assets/sfx/impactBell_heavy_000.ogg" data-start="15" data-duration="3.5" data-track-index="24" data-volume="0.7"></audio>
-      <audio id="bell-2" src="assets/sfx/impactBell_heavy_000.ogg" data-start="19.1" data-duration="2.9" data-track-index="24" data-volume="0.45"></audio>
-      <!-- Clicks on the real taps in the take (share, Tardy, agent, Send) -->
-      <audio id="tap-1" src="assets/sfx/click_002.ogg" data-start="8.75" data-track-index="25" data-volume="0.8"></audio>
-      <audio id="tap-2" src="assets/sfx/click_004.ogg" data-start="10.1" data-track-index="25" data-volume="0.8"></audio>
-      <audio id="tap-3" src="assets/sfx/click_002.ogg" data-start="11.45" data-track-index="25" data-volume="0.8"></audio>
-      <audio id="tap-4" src="assets/sfx/click_004.ogg" data-start="13.65" data-track-index="25" data-volume="0.8"></audio>
+      <!-- Audio: original bed from build-audio.sh (120 BPM, drop at 4.0) + CC0 clicks on the real taps -->
+      <audio id="music" src="assets/score/music.wav" data-start="0" data-duration="20" data-track-index="20" data-volume="1.6"></audio>
+      <audio id="tap-1" src="assets/sfx/click_002.ogg" data-start="4.85" data-track-index="21" data-volume="0.7"></audio>
+      <audio id="tap-2" src="assets/sfx/click_004.ogg" data-start="6.65" data-track-index="22" data-volume="0.7"></audio>
+      <audio id="tap-3" src="assets/sfx/click_002.ogg" data-start="8.45" data-track-index="23" data-volume="0.7"></audio>
+      <audio id="tap-4" src="assets/sfx/click_004.ogg" data-start="9.5" data-track-index="24" data-volume="0.7"></audio>
     </div>
 
     <script>
-      // The real mobile/app.json hunk from PR #16 (7526b47), typed out behind "Zero lines of Swift".
-      const DIFF = [
-        "mobile/app.json",
-        '-      "expo-notifications"',
-        '+      "expo-notifications",',
-        "+      [",
-        '+        "expo-share-intent",',
-        "+        {",
-        '+          "iosShareExtensionName": "Open in Tardy",',
-        '+          "iosActivationRules": {',
-        '+            "NSExtensionActivationSupportsWebURL…": 1,',
-        '+            "NSExtensionActivationSupportsText": true',
-        "+          },",
-        "+        }",
-        "+      ]",
-      ].join("\n");
-      const diffEl = document.getElementById("diff");
-      const typed = { n: 0 };
-      function paintDiff() {
-        const shown = DIFF.slice(0, Math.round(typed.n));
-        const nl = shown.indexOf("\n");
-        diffEl.innerHTML = "";
-        const head = document.createElement("span");
-        head.className = "file";
-        head.textContent = nl < 0 ? shown : shown.slice(0, nl + 1);
-        diffEl.appendChild(head);
-        if (nl >= 0) diffEl.appendChild(document.createTextNode(shown.slice(nl + 1)));
-      }
-      paintDiff();
-
       const tl = gsap.timeline({ paused: true });
+      const BLUR_IN = { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.45, ease: "power3.out" };
+      const blurFrom = (y = 24, b = 16) => ({ opacity: 0, y, filter: `blur(${b}px)` });
 
-      // 1. Cold open: card is up by 0.3s (hook at 0.5s), holds. // beat-locked: hit 0.0
-      tl.fromTo("#cold-a", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.3, ease: "power3.out" }, 0.0);
-      tl.fromTo("#cold-b", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.3, ease: "power3.out" }, 0.08);
-      tl.fromTo("#cold-k", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 0.5);
-      tl.fromTo("#cold .card", { scale: 1 }, { scale: 1.04, duration: 2, ease: "none" }, 0);
-
-      // 2. Build cards slam in on each hit, then drift (trailer push). // beat-locked: 2.0, 3.8, 5.6
-      [["#b1", 2.0], ["#b2", 3.8], ["#b3", 5.6]].forEach(([id, t]) => {
-        tl.fromTo(`${id} .card`, { scale: 1.18, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.22, ease: "power4.out" }, t);
-        tl.to(`${id} .card`, { scale: 0.96, duration: 1.5, ease: "none" }, t + 0.22);
-      });
-      tl.fromTo("#bar-top", { y: -734 }, { y: 0, duration: 0.35, ease: "power3.out" }, 2.0);
-      tl.fromTo("#bar-bot", { y: 734 }, { y: 0, duration: 0.35, ease: "power3.out" }, 2.0);
-      tl.fromTo(typed, { n: 0 }, { n: DIFF.length, duration: 1.55, ease: "none", onUpdate: paintDiff }, 5.6);
-
-      // 3. Reveal: bars open on the braam, device rises (its own IN), labels on the taps. // beat-locked: braam 7.75
-      tl.to("#bar-top", { y: -740, duration: 0.6, ease: "power3.inOut" }, 7.75);
-      tl.to("#bar-bot", { y: 740, duration: 0.6, ease: "power3.inOut" }, 7.75);
-      tl.to("#grain-overlay .grain-texture", { opacity: 0, duration: 0.4 }, 7.75);
-      ["#l1", "#l2", "#l3", "#l4"].forEach((id, i) => {
-        const t = [7.9, 9.9, 11.35, 13.4][i];
-        tl.fromTo(id, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.25, ease: "power2.out" }, t);
-      });
-      // Punch in on the share row while Tardy appears in it, then back out for the sheet.
-      tl.fromTo("#dev-wrap", { scale: 1 }, { scale: 1.5, duration: 0.6, ease: "power2.inOut" }, 9.3);
-      tl.to("#dev-wrap", { scale: 1, duration: 0.5, ease: "power2.inOut" }, 10.45);
-      // Second punch: the sheet (Your agents, the grant line, Send). Origin moves while scale is 1, so no jump.
-      tl.set("#dev-wrap", { transformOrigin: "540px 1323px" }, 11.0);
-      tl.to("#dev-wrap", { scale: 1.3, duration: 0.6, ease: "power2.inOut" }, 11.3);
-      // Zoom-blur out of the phone into the title.
-      tl.fromTo("#dev-wrap", { opacity: 1, filter: "blur(0px)" }, { scale: 2.6, opacity: 0, filter: "blur(18px)", duration: 0.45, ease: "power3.in", immediateRender: false }, 14.6);
-
-      // 4. Title: push in from blur, hold >= 3s. // beat-locked: braam 15.0
-      tl.fromTo("#title-wrap", { scale: 1.5, opacity: 0, filter: "blur(24px)" }, { scale: 1, opacity: 1, filter: "blur(0px)", duration: 0.5, ease: "power3.out" }, 15.0);
-      tl.to("#title-wrap", { scale: 1.04, duration: 3.3, ease: "none" }, 15.5);
-      tl.fromTo("#billing", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 15.9);
-      tl.to("#title-wrap", { opacity: 0, duration: 0.25 }, 18.9);
-
-      // 5. Tag. // beat-locked: bell 19.1
-      tl.fromTo("#tag-line", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 19.1);
-      tl.fromTo("#tag-stay", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 19.3);
-      tl.fromTo("#wordmark", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.5, ease: "power3.out" }, 19.05);
-
-      // Grain jitter, stepped and seekable (replaces the component's infinite CSS animation).
-      for (let i = 0; i < 82; i++) {
-        tl.set("#grain-overlay .grain-texture", { x: ((i * 37) % 11) * 9 - 45, y: ((i * 53) % 13) * 7 - 42 }, i * 0.1);
+      // Aurora drift across the whole piece, and a beat pulse from the drop. // beat-grid: every 0.5s, 4.0-15.0
+      tl.fromTo("#blob-a", { x: -60, y: 40 }, { x: 60, y: -80, duration: 20, ease: "sine.inOut" }, 0);
+      tl.fromTo("#blob-b", { x: 80, y: 0 }, { x: -90, y: -60, duration: 20, ease: "sine.inOut" }, 0);
+      for (let t = 4.0; t < 15.0; t += 0.5) {
+        tl.fromTo("#blob-a", { opacity: 1 }, { opacity: 0.72, duration: 0.45, ease: "power2.out", immediateRender: false }, t);
       }
+
+      // 1. Hook: words blur in, staggered. "Share any link" readable by 0.5s.
+      tl.fromTo("#hook .h1:nth-child(1) .word", blurFrom(), { ...BLUR_IN, stagger: 0.12 }, 0.05);
+      tl.fromTo("#hook .h1:nth-child(2) .word", blurFrom(), { ...BLUR_IN, stagger: 0.12 }, 0.75);
+      tl.to("#hook", { opacity: 0, filter: "blur(14px)", scale: 0.96, duration: 0.3, ease: "power2.in" }, 2.2);
+
+      // 2. Introducing -> icon -> title; the lockup lifts away on the drop. // beat-locked: 2.5, 3.0, 3.5, drop 4.0
+      tl.fromTo("#intro-kicker", blurFrom(16, 10), BLUR_IN, 2.5);
+      tl.fromTo("#intro-icon", { opacity: 0, scale: 0.6, filter: "blur(20px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.6, ease: "back.out(1.6)" }, 3.0);
+      tl.fromTo("#intro-title", blurFrom(30, 18), BLUR_IN, 3.5);
+      tl.to("#intro-wrap", { y: -120, opacity: 0, filter: "blur(12px)", duration: 0.45, ease: "power3.in" }, 4.05);
+
+      // 3. Demo: punch in on the share row, then on the sheet; captions ride the beat.
+      tl.fromTo("#dev-wrap", { scale: 1 }, { scale: 1.35, duration: 0.55, ease: "power2.inOut" }, 5.4);
+      tl.to("#dev-wrap", { scale: 1, duration: 0.4, ease: "power2.inOut" }, 6.55);
+      tl.set("#dev-wrap", { transformOrigin: "540px 1323px" }, 7.0);
+      tl.to("#dev-wrap", { scale: 1.22, duration: 0.5, ease: "power2.inOut" }, 7.05);
+      tl.fromTo("#dev-wrap", { opacity: 1, filter: "blur(0px)" }, { y: -60, opacity: 0, filter: "blur(16px)", duration: 0.35, ease: "power2.in", immediateRender: false }, 9.8);
+      ["#c1", "#c2", "#c3"].forEach((id, i) => {
+        const t = [4.7, 6.85, 8.5][i];
+        tl.fromTo(`${id} > div`, blurFrom(14, 10), { ...BLUR_IN, stagger: 0.15 }, t);
+      });
+      tl.fromTo("#toast", { opacity: 0, scale: 0.7, y: 30 }, { opacity: 1, scale: 1, y: 0, duration: 0.35, ease: "back.out(2)" }, 9.5);
+
+      // 4. Bento: cards land one per beat, then hold together. // beat-grid: 10.5, 11.0, 11.5, 12.0, 12.5
+      tl.fromTo("#bento-kicker", blurFrom(12, 8), BLUR_IN, 10.2);
+      ["#card-a", "#card-b", "#card-c", "#card-d", "#card-e"].forEach((id, i) => {
+        tl.fromTo(id, { opacity: 0, y: 60, scale: 0.94, filter: "blur(12px)" }, { opacity: 1, y: 0, scale: 1, filter: "blur(0px)", duration: 0.5, ease: "power3.out" }, 10.5 + i * 0.5);
+      });
+      tl.to("#s-bento .card, #bento-kicker", { opacity: 0, y: -40, filter: "blur(10px)", duration: 0.35, stagger: 0.03, ease: "power2.in" }, 14.6);
+
+      // 5. End card. // beat-locked: 15.0, 15.5, 16.0, 17.0, 17.5
+      tl.fromTo("#end-icon", { opacity: 0, scale: 0.6, filter: "blur(20px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.6, ease: "back.out(1.6)" }, 15.0);
+      tl.fromTo("#end-title", blurFrom(30, 18), BLUR_IN, 15.5);
+      tl.fromTo("#end-sub", blurFrom(14, 8), BLUR_IN, 16.0);
+      tl.fromTo("#end-sign", blurFrom(14, 8), BLUR_IN, 17.0);
+      tl.fromTo("#end-stay", blurFrom(14, 8), BLUR_IN, 17.25);
+      tl.fromTo("#wordmark", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.5, ease: "power3.out" }, 17.5);
+      tl.fromTo("#end-icon", { y: 0 }, { y: -14, duration: 2.4, ease: "sine.inOut", immediateRender: false }, 15.6);
 
       window.__timelines["main"] = tl;
     </script>

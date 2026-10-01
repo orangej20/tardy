@@ -1,1 +1,1 @@
-This fall, the share row was incomplete. "Open in Tardy": any link from Safari, straight to your agents. Zero lines of Swift. Stay Tardy.
+Introducing "Open in Tardy": share any link from Safari, YouTube, or any app straight to your agents. One tap. Zero lines of Swift.
