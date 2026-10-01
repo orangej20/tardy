@@ -1,6 +1,7 @@
 use crate::domain::{
-    DirectMessage, DirectThread, FeedItem, LiveEvent, LiveEventPayload, LiveSession, LiveStatus,
-    Profile, ProfilePrivacy, PublicProfile, Reel, ShareGrant, ShareSubject, Visibility,
+    DirectMessage, DirectThread, EngagementKind, EngagementReceipt, FeedItem, HyperTardyItem,
+    LiveEvent, LiveEventPayload, LiveSession, LiveStatus, Profile, ProfilePrivacy, PublicProfile,
+    Reel, ShareGrant, ShareSubject, Visibility,
 };
 use crate::privacy::PrivacyPolicy;
 use std::collections::{HashMap, HashSet};
@@ -13,6 +14,8 @@ pub enum StoreError {
     ProfileNotFound,
     #[error("live session not found")]
     LiveNotFound,
+    #[error("reel not found")]
+    ReelNotFound,
     #[error("live session has ended")]
     LiveEnded,
     #[error("handle is already in use")]
@@ -27,6 +30,8 @@ pub enum StoreError {
     DirectMessagesClosed,
     #[error("message body must not be empty")]
     EmptyMessage,
+    #[error("engagement event id was already used for different data")]
+    IdempotencyConflict,
     #[error("store lock poisoned")]
     Poisoned,
 }
@@ -80,6 +85,20 @@ pub trait Store: Send + Sync {
         after: u64,
     ) -> Result<Vec<LiveEvent>, StoreError>;
     fn feed_candidates(&self, viewer_id: Option<Uuid>) -> Result<Vec<FeedItem>, StoreError>;
+    fn record_engagement(
+        &self,
+        actor: Uuid,
+        reel_id: Uuid,
+        event_id: Uuid,
+        kind: EngagementKind,
+        at_ms: u64,
+    ) -> Result<EngagementReceipt, StoreError>;
+    fn hyper_tardy(
+        &self,
+        viewer_id: Option<Uuid>,
+        now_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<HyperTardyItem>, StoreError>;
     fn public_profile(
         &self,
         handle: &str,
@@ -130,6 +149,7 @@ struct State {
     messages: HashMap<Uuid, Vec<DirectMessage>>,
     shares: HashMap<Uuid, ShareGrant>,
     share_ids_by_token: HashMap<Uuid, Uuid>,
+    engagements: Vec<EngagementReceipt>,
 }
 
 #[derive(Clone, Default)]
@@ -293,6 +313,118 @@ impl Store for MemoryStore {
                 .cloned()
                 .map(FeedItem::Live),
         );
+        Ok(items)
+    }
+
+    fn record_engagement(
+        &self,
+        actor: Uuid,
+        reel_id: Uuid,
+        event_id: Uuid,
+        kind: EngagementKind,
+        at_ms: u64,
+    ) -> Result<EngagementReceipt, StoreError> {
+        let mut state = self.state.write().map_err(|_| StoreError::Poisoned)?;
+        require_profile(&state, actor)?;
+        let reel = state.reels.get(&reel_id).ok_or(StoreError::ReelNotFound)?;
+        if !PrivacyPolicy::can_view_content(
+            Some(actor),
+            reel.profile_id,
+            reel.visibility,
+            blocked_between(&state, Some(actor), reel.profile_id),
+        ) {
+            return Err(StoreError::ReelNotFound);
+        }
+        if let Some(existing) = state
+            .engagements
+            .iter()
+            .find(|engagement| engagement.event_id == event_id && engagement.profile_id == actor)
+        {
+            return if existing.reel_id == reel_id && existing.kind == kind {
+                Ok(existing.clone())
+            } else {
+                Err(StoreError::IdempotencyConflict)
+            };
+        }
+        let counted = actor != reel.profile_id
+            && !state.engagements.iter().any(|engagement| {
+                engagement.reel_id == reel_id
+                    && engagement.profile_id == actor
+                    && engagement.kind == kind
+                    && engagement.counted
+            });
+        let receipt = EngagementReceipt {
+            event_id,
+            reel_id,
+            profile_id: actor,
+            kind,
+            occurred_at_ms: at_ms,
+            counted,
+        };
+        state.engagements.push(receipt.clone());
+        Ok(receipt)
+    }
+
+    fn hyper_tardy(
+        &self,
+        viewer_id: Option<Uuid>,
+        now_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<HyperTardyItem>, StoreError> {
+        const WINDOW_MS: u64 = 6 * 60 * 60 * 1_000;
+        const MINIMUM_SCORE: u64 = 10;
+        let state = self.state.read().map_err(|_| StoreError::Poisoned)?;
+        let window_started_at_ms = now_ms.saturating_sub(WINDOW_MS);
+        let mut items = state
+            .reels
+            .values()
+            .filter(|reel| reel.published_at_ms >= window_started_at_ms)
+            .filter(|reel| {
+                PrivacyPolicy::can_view_content(
+                    viewer_id,
+                    reel.profile_id,
+                    reel.visibility,
+                    blocked_between(&state, viewer_id, reel.profile_id),
+                )
+            })
+            .map(|reel| {
+                let mut result = HyperTardyItem {
+                    reel: reel.clone(),
+                    score: 0,
+                    unique_views: 0,
+                    unique_completed_views: 0,
+                    unique_likes: 0,
+                    unique_shares: 0,
+                    window_started_at_ms,
+                };
+                for engagement in state.engagements.iter().filter(|engagement| {
+                    engagement.reel_id == reel.id
+                        && engagement.counted
+                        && engagement.occurred_at_ms >= window_started_at_ms
+                }) {
+                    match engagement.kind {
+                        EngagementKind::View => result.unique_views += 1,
+                        EngagementKind::CompletedView => result.unique_completed_views += 1,
+                        EngagementKind::Like => result.unique_likes += 1,
+                        EngagementKind::Share => result.unique_shares += 1,
+                    }
+                }
+                result.score = result.unique_views
+                    + result.unique_completed_views * 4
+                    + result.unique_likes * 6
+                    + result.unique_shares * 12;
+                result
+            })
+            .filter(|item| item.score >= MINIMUM_SCORE)
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            right
+                .score
+                .cmp(&left.score)
+                .then_with(|| right.reel.published_at_ms.cmp(&left.reel.published_at_ms))
+                .then_with(|| left.reel.id.cmp(&right.reel.id))
+        });
+        items.truncate(limit);
         Ok(items)
     }
 
@@ -654,6 +786,88 @@ mod tests {
             .unwrap();
         assert!(store.feed_candidates(None).unwrap().is_empty());
         assert_eq!(store.feed_candidates(Some(profile.id)).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn hyper_tardy_counts_unique_non_owner_velocity_and_honors_visibility() {
+        let store = MemoryStore::default();
+        let owner = profile(&store);
+        let viewer = store
+            .create_profile(NewProfile {
+                handle: "viewer".into(),
+                display_name: "Viewer".into(),
+                bio: String::new(),
+                privacy: ProfilePrivacy::default(),
+                created_at_ms: 1,
+            })
+            .unwrap();
+        let reel = store
+            .publish_reel(
+                owner.id,
+                NewReel {
+                    profile_id: owner.id,
+                    caption: "breaking".into(),
+                    media_url: "https://media.test/reel.mp4".into(),
+                    poster_url: None,
+                    duration_ms: 10,
+                    visibility: Visibility::Public,
+                    published_at_ms: 1_000,
+                },
+            )
+            .unwrap();
+
+        let event_id = Uuid::new_v4();
+        let receipt = store
+            .record_engagement(viewer.id, reel.id, event_id, EngagementKind::Share, 2_000)
+            .unwrap();
+        assert!(receipt.counted);
+        assert_eq!(
+            store
+                .record_engagement(viewer.id, reel.id, event_id, EngagementKind::Share, 2_001)
+                .unwrap(),
+            receipt
+        );
+        assert_eq!(
+            store.record_engagement(viewer.id, reel.id, event_id, EngagementKind::Like, 2_001,),
+            Err(StoreError::IdempotencyConflict)
+        );
+        assert!(
+            !store
+                .record_engagement(
+                    viewer.id,
+                    reel.id,
+                    Uuid::new_v4(),
+                    EngagementKind::Share,
+                    2_002,
+                )
+                .unwrap()
+                .counted
+        );
+        assert!(
+            !store
+                .record_engagement(
+                    owner.id,
+                    reel.id,
+                    Uuid::new_v4(),
+                    EngagementKind::Share,
+                    2_003,
+                )
+                .unwrap()
+                .counted
+        );
+
+        let items = store.hyper_tardy(None, 3_000, 10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].score, 12);
+        assert_eq!(items[0].unique_shares, 1);
+
+        store.block_profile(owner.id, viewer.id).unwrap();
+        assert!(
+            store
+                .hyper_tardy(Some(viewer.id), 3_000, 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -43,6 +43,7 @@ Prices and the SUPER allocation limit live once in `src/product.rs`. Billing and
 cargo run
 curl http://127.0.0.1:3000/healthz -i
 curl http://127.0.0.1:3000/metrics
+curl http://127.0.0.1:3000/openapi.json
 ```
 
 Set `TARDY_BIND` and `TARDY_PUBLIC_BASE_URL` when the advertised API URL differs from the listener address.
@@ -69,11 +70,17 @@ Enable uploads with `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
 | `POST` | `/v1/uploads` | Authorize a bounded direct-to-R2 upload |
 | `POST` | `/v1/uploads/{id}/complete` | HEAD-verify and quarantine an uploaded object |
 | `POST` | `/v1/reels` | Publish a rendered Hyperframes reel reference |
+| `POST` | `/v1/reels/{id}/engagements` | Record an idempotent authenticated virality signal |
 | `POST` | `/v1/lives` | Start an agent coding session |
 | `POST/GET` | `/v1/lives/{id}/events` | Append or resume ordered live events |
 | `POST` | `/v1/lives/{id}/end` | End a session |
 | `GET` | `/v1/feed` | Fetch ranked reels and live sessions |
+| `GET` | `/v1/feed/hyper-tardy` | Fetch fresh, high-velocity breaking reels |
 | `POST` | `/v1/agent-handoffs` | Create a direct-to-agent integration bundle |
+
+OpenAPI 3.1 is generated from Rust schemas and can also be exported with `cargo run --locked --bin export-openapi -- openapi.json`. See `docs/api-clients.md` for TypeScript/Swift generation and the REST + resumable SSE streaming direction.
+
+The breaking-news lane is available at `GET /v1/feed/hyper-tardy`; authenticated clients record idempotent reel engagement at `POST /v1/reels/{id}/engagements`. Scores use unique-profile velocity over a bounded window and still enforce content privacy and blocks.
 
 Account credentials, one-time claim codes, and account/profile ownership are durable in SQLite. Claim codes and API tokens are stored only as digests. Profile/content/DM storage remains intentionally in-memory for this slice. Full durable social storage, follower graphs, actual video transport, the x402 facilitator client, and UI are next-stage boundaries—not silent mock implementations.
 

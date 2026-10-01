@@ -6,11 +6,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 const UPLOAD_TTL_MS: u64 = 15 * 60 * 1_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MediaKind {
     Scene,
@@ -46,7 +47,7 @@ impl MediaKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct UploadIntent {
     pub profile_id: Uuid,
     pub kind: MediaKind,
@@ -55,7 +56,7 @@ pub struct UploadIntent {
     pub sha256_base64: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct UploadAuthorization {
     pub id: Uuid,
     pub method: String,
@@ -65,7 +66,7 @@ pub struct UploadAuthorization {
     pub max_bytes: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct MediaAsset {
     pub id: Uuid,
     pub profile_id: Uuid,
@@ -77,7 +78,7 @@ pub struct MediaAsset {
     pub status: MediaStatus,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MediaStatus {
     Quarantined,

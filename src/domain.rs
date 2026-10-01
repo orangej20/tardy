@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub type TimestampMs = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
     Public,
@@ -11,7 +12,7 @@ pub enum Visibility {
     Private,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Profile {
     pub id: Uuid,
     pub handle: String,
@@ -21,7 +22,7 @@ pub struct Profile {
     pub created_at_ms: TimestampMs,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileVisibility {
     Public,
@@ -29,21 +30,21 @@ pub enum ProfileVisibility {
     Private,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DirectMessagePolicy {
     Everyone,
     Nobody,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ResharePolicy {
     OwnerOnly,
     AnyoneWhoCanView,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ProfilePrivacy {
     pub profile_visibility: ProfileVisibility,
     pub direct_messages: DirectMessagePolicy,
@@ -62,7 +63,7 @@ impl Default for ProfilePrivacy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PublicProfile {
     pub id: Uuid,
     pub handle: String,
@@ -81,7 +82,7 @@ impl From<&Profile> for PublicProfile {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Reel {
     pub id: Uuid,
     pub profile_id: Uuid,
@@ -94,14 +95,46 @@ pub struct Reel {
     pub published_at_ms: TimestampMs,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EngagementKind {
+    View,
+    CompletedView,
+    Like,
+    Share,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EngagementReceipt {
+    pub event_id: Uuid,
+    pub reel_id: Uuid,
+    pub profile_id: Uuid,
+    pub kind: EngagementKind,
+    pub occurred_at_ms: TimestampMs,
+    /// False when this profile already contributed this signal for the reel.
+    pub counted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct HyperTardyItem {
+    pub reel: Reel,
+    /// Deterministic weighted velocity score, intended for ordering rather than display.
+    pub score: u64,
+    pub unique_views: u64,
+    pub unique_completed_views: u64,
+    pub unique_likes: u64,
+    pub unique_shares: u64,
+    pub window_started_at_ms: TimestampMs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LiveStatus {
     Live,
     Ended,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct LiveSession {
     pub id: Uuid,
     pub profile_id: Uuid,
@@ -115,7 +148,7 @@ pub struct LiveSession {
     pub latest_sequence: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct LiveEvent {
     pub session_id: Uuid,
     /// Monotonic within a session. Assigned by Tardy, never the producer.
@@ -125,7 +158,7 @@ pub struct LiveEvent {
     pub payload: LiveEventPayload,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LiveEventPayload {
     Status { message: String },
@@ -134,14 +167,14 @@ pub enum LiveEventPayload {
     ViewerCount { count: u64 },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FeedItem {
     Reel(Reel),
     Live(LiveSession),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ShareSubject {
     Profile { id: Uuid },
@@ -149,7 +182,7 @@ pub enum ShareSubject {
     Live { id: Uuid },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AgentHandoff {
     pub schema_version: String,
     pub target: String,
@@ -158,7 +191,7 @@ pub struct AgentHandoff {
     pub capabilities: AgentCapabilities,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AgentCapabilities {
     pub publish_reel_url: String,
     pub start_live_url: String,
@@ -166,7 +199,7 @@ pub struct AgentCapabilities {
     pub end_live_url_template: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct DirectThread {
     pub id: Uuid,
     pub participants: [Uuid; 2],
@@ -174,7 +207,7 @@ pub struct DirectThread {
     pub latest_sequence: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct DirectMessage {
     pub thread_id: Uuid,
     pub sequence: u64,
@@ -183,7 +216,7 @@ pub struct DirectMessage {
     pub sent_at_ms: TimestampMs,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ShareGrant {
     pub id: Uuid,
     pub token: Uuid,

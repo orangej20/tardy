@@ -3,25 +3,26 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::Mutex;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 const CLAIM_TTL_MS: u64 = 24 * 60 * 60 * 1_000;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ClaimCode {
     /// Returned exactly once. Only its SHA-256 digest is persisted.
     pub code: String,
     pub expires_at_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Account {
     pub id: Uuid,
     pub email: String,
     pub created_at_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ClaimedAccount {
     pub account: Account,
     /// Returned exactly once. Only its digest is persisted.

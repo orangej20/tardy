@@ -4,6 +4,7 @@ pub mod domain;
 pub mod media;
 pub mod metrics;
 pub mod onboarding;
+pub mod openapi;
 pub mod privacy;
 pub mod product;
 pub mod ranking;

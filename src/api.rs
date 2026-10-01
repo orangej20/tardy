@@ -1,5 +1,6 @@
 use crate::domain::{
-    AgentCapabilities, AgentHandoff, LiveEventPayload, ProfilePrivacy, ShareSubject, Visibility,
+    AgentCapabilities, AgentHandoff, EngagementKind, LiveEventPayload, ProfilePrivacy,
+    ShareSubject, Visibility,
 };
 use crate::media::{MediaError, MediaService, UploadIntent};
 use crate::metrics::Metrics;
@@ -14,6 +15,7 @@ use axum::{Json, Router, middleware};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub struct AppState {
@@ -59,6 +61,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(|| async { StatusCode::NO_CONTENT }))
         .route("/metrics", get(metrics_endpoint))
+        .route("/openapi.json", get(openapi_endpoint))
         .route("/llms.txt", get(llms_txt))
         .route("/v1/profiles", post(create_profile))
         .route("/v1/profiles/{handle}", get(get_profile))
@@ -77,10 +80,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/uploads", post(authorize_upload))
         .route("/v1/uploads/{id}/complete", post(complete_upload))
         .route("/v1/reels", post(publish_reel))
+        .route("/v1/reels/{id}/engagements", post(record_engagement))
         .route("/v1/lives", post(start_live))
         .route("/v1/lives/{id}/events", post(append_event).get(list_events))
         .route("/v1/lives/{id}/end", post(end_live))
         .route("/v1/feed", get(feed))
+        .route("/v1/feed/hyper-tardy", get(hyper_tardy_feed))
         .route("/v1/agent-handoffs", post(agent_handoff))
         .with_state(state)
         .layer(middleware::from_fn(move |request, next| {
@@ -92,8 +97,12 @@ async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Response {
     crate::metrics::response(&state.metrics)
 }
 
-#[derive(Deserialize)]
-struct CreateProfile {
+async fn openapi_endpoint() -> Json<serde_json::Value> {
+    Json(crate::openapi::document())
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct CreateProfile {
     handle: String,
     display_name: String,
     #[serde(default)]
@@ -118,8 +127,8 @@ async fn create_profile(
     Ok((StatusCode::CREATED, Json(value)))
 }
 
-#[derive(Deserialize)]
-struct PublishReel {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct PublishReel {
     profile_id: Uuid,
     caption: String,
     media_url: String,
@@ -149,8 +158,33 @@ async fn publish_reel(
     Ok((StatusCode::CREATED, Json(value)))
 }
 
-#[derive(Deserialize)]
-struct StartLive {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct RecordEngagement {
+    /// Stable client-generated UUID used to make retries idempotent.
+    event_id: Uuid,
+    kind: EngagementKind,
+}
+
+async fn record_engagement(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(body): Json<RecordEngagement>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok((
+        StatusCode::CREATED,
+        Json(state.store.record_engagement(
+            authenticated_actor(&state, &headers)?,
+            id,
+            body.event_id,
+            body.kind,
+            now_ms()?,
+        )?),
+    ))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct StartLive {
     profile_id: Uuid,
     title: String,
     repository_url: String,
@@ -252,8 +286,23 @@ async fn feed(
     Ok(Json(items))
 }
 
-#[derive(Deserialize)]
-struct HandoffRequest {
+async fn hyper_tardy_feed(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<FeedQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    if !(1..=100).contains(&query.limit) {
+        return Err(ApiError::bad_request("limit must be between 1 and 100"));
+    }
+    Ok(Json(state.store.hyper_tardy(
+        optional_authenticated_actor(&state, &headers)?,
+        now_ms()?,
+        query.limit,
+    )?))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct HandoffRequest {
     target: String,
     subject: ShareSubject,
 }
@@ -347,8 +396,8 @@ async fn block_profile(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Deserialize)]
-struct CreateThread {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct CreateThread {
     recipient_id: Uuid,
 }
 
@@ -367,8 +416,8 @@ async fn create_thread(
     ))
 }
 
-#[derive(Deserialize)]
-struct SendMessage {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct SendMessage {
     body: String,
 }
 
@@ -402,8 +451,8 @@ async fn list_messages(
     )?))
 }
 
-#[derive(Deserialize)]
-struct CreateShare {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct CreateShare {
     subject: ShareSubject,
     expires_at_ms: Option<u64>,
 }
@@ -451,8 +500,8 @@ async fn issue_agent_code(
     Ok((StatusCode::CREATED, Json(claim)))
 }
 
-#[derive(Deserialize)]
-struct ClaimAgentCode {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct ClaimAgentCode {
     code: String,
     email: String,
 }
@@ -649,8 +698,8 @@ impl ApiError {
     }
 }
 
-#[derive(Serialize)]
-struct ErrorBody {
+#[derive(Serialize, ToSchema)]
+pub(crate) struct ErrorBody {
     error: String,
 }
 
@@ -670,6 +719,7 @@ impl From<StoreError> for ApiError {
     fn from(value: StoreError) -> Self {
         match value {
             StoreError::ProfileNotFound
+            | StoreError::ReelNotFound
             | StoreError::LiveNotFound
             | StoreError::ThreadNotFound
             | StoreError::ShareNotFound => Self::not_found(value.to_string()),
@@ -677,6 +727,10 @@ impl From<StoreError> for ApiError {
                 Self::forbidden(value.to_string())
             }
             StoreError::EmptyMessage => Self::bad_request(value.to_string()),
+            StoreError::IdempotencyConflict => Self {
+                status: StatusCode::CONFLICT,
+                message: value.to_string(),
+            },
             StoreError::LiveEnded | StoreError::HandleConflict => Self {
                 status: StatusCode::CONFLICT,
                 message: value.to_string(),
@@ -766,6 +820,20 @@ mod tests {
             serde_json::from_slice(&bytes).unwrap()
         };
         (status, value)
+    }
+
+    #[tokio::test]
+    async fn serves_the_generated_openapi_contract() {
+        let app = router(Arc::new(AppState::in_memory("https://tardy.test").unwrap()));
+        let (status, document) =
+            request(&app, "GET", "/openapi.json", Value::Null, None, None).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(document["openapi"], "3.1.0");
+        assert_eq!(
+            document["paths"]["/v1/uploads"]["post"]["operationId"],
+            "authorizeUpload"
+        );
     }
 
     #[tokio::test]
