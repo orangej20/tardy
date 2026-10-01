@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>Open in Tardy: launch trailer</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      /* Trailer caps: Avenir Next Condensed Heavy, a macOS system font, loaded by name (not shipped). */
+      @font-face {
+        font-family: "Trailer";
+        src: local("AvenirNextCondensed-Heavy"), local("Avenir Next Condensed Heavy");
+        font-weight: 800;
+      }
+      @font-face {
+        font-family: "TrailerLight";
+        src: local("AvenirNextCondensed-Medium"), local("Avenir Next Condensed Medium");
+        font-weight: 500;
+      }
+      /* Palette: mobile/src/theme/index.ts (bg, surface, text, textSecondary, textTertiary, primary). */
+      :root {
+        --bg: #0a0a0d;
+        --surface: #15151b;
+        --text: #f7f7fa;
+        --text-2: #a1a1ae;
+        --text-3: #80808c;
+        --primary: #ffc21a;
+        --bar: #000000;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: var(--bg);
+      }
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Trailer", system-ui, sans-serif;
+      }
+      .scene {
+        position: absolute;
+        inset: 0;
+      }
+      /* Key text lives in the feed-safe column: x 190-890 keeps clear of the action rail. */
+      .card {
+        position: absolute;
+        left: 190px;
+        width: 700px;
+        top: 734px;
+        height: 452px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+      }
+      .caps {
+        font-family: "Trailer", system-ui, sans-serif;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        line-height: 0.98;
+      }
+      .card .caps {
+        font-size: 104px;
+      }
+      #cold .caps {
+        font-size: 74px;
+        white-space: nowrap;
+      }
+      #cold .kicker {
+        margin-top: 28px;
+        font-family: "TrailerLight", system-ui, sans-serif;
+        font-size: 34px;
+        letter-spacing: 0.32em;
+        color: var(--text-2);
+        text-transform: uppercase;
+      }
+      /* The picture band between the bars. */
+      #band {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 734px;
+        height: 452px;
+        background: radial-gradient(ellipse at 50% 50%, var(--surface) 0%, var(--bg) 75%);
+      }
+      #bar-top,
+      #bar-bot {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 734px;
+        background: var(--bar);
+      }
+      #bar-top {
+        top: 0;
+      }
+      #bar-bot {
+        bottom: 0;
+      }
+      #diff {
+        position: absolute;
+        left: 70px;
+        top: 760px;
+        width: 820px;
+        height: 400px;
+        overflow: hidden;
+        font-family: monospace;
+        font-size: 25px;
+        line-height: 1.32;
+        color: var(--text-3);
+        white-space: pre;
+        opacity: 0.55;
+      }
+      #diff .file {
+        color: var(--text-2);
+      }
+      /* Reveal */
+      #dev-wrap {
+        position: absolute;
+        left: 0;
+        top: 90px;
+        width: 1080px;
+        height: 1240px;
+        transform-origin: 595px 904px;
+      }
+      #dev-host {
+        position: absolute;
+        inset: 0;
+      }
+      #label-scrim {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 400px;
+        background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 70%, rgba(10, 10, 13, 0) 100%);
+      }
+      .label {
+        position: absolute;
+        left: 190px;
+        width: 700px;
+        top: 232px;
+        height: 90px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 66px;
+        text-align: center;
+      }
+      .label em {
+        font-style: normal;
+        color: var(--primary);
+      }
+      /* Title */
+      #title-wrap {
+        position: absolute;
+        left: 190px;
+        width: 700px;
+        top: 470px;
+        height: 960px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+      }
+      #title-a {
+        font-size: 150px;
+        color: var(--primary);
+        letter-spacing: 0.06em;
+      }
+      #title-b {
+        font-size: 268px;
+        color: var(--primary);
+        letter-spacing: 0.02em;
+        line-height: 0.9;
+      }
+      #release {
+        margin-top: 34px;
+        font-size: 50px;
+        letter-spacing: 0.24em;
+        color: var(--text);
+      }
+      #billing {
+        margin-top: 64px;
+        font-family: "TrailerLight", system-ui, sans-serif;
+        font-weight: 500;
+        font-size: 30px;
+        line-height: 1.5;
+        letter-spacing: 0.14em;
+        color: var(--text-2);
+        text-transform: uppercase;
+      }
+      #billing b {
+        font-family: "Trailer", system-ui, sans-serif;
+        font-weight: 800;
+        color: var(--text);
+      }
+      /* Tag */
+      #tag-wrap {
+        position: absolute;
+        left: 190px;
+        width: 700px;
+        top: 620px;
+        height: 700px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        font-family: system-ui, sans-serif;
+      }
+      #tag-line {
+        font-size: 58px;
+        font-weight: 800;
+        line-height: 1.15;
+        color: var(--text);
+      }
+      #tag-stay {
+        margin-top: 18px;
+        font-size: 70px;
+        font-weight: 900;
+        color: var(--primary);
+      }
+      #wordmark {
+        display: block;
+        margin-top: 70px;
+        width: 450px;
+        height: 165px;
+      }
+      #grain-overlay .grain-texture {
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+        opacity: 0.16;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="22"
+      data-width="1080"
+      data-height="1920"
+      data-fps="30"
+    >
+      <!-- 1. Cold open: the stakes, in five words -->
+      <section id="cold" class="scene clip" data-start="0" data-duration="2" data-track-index="1">
+        <div class="card">
+          <div id="cold-a" class="caps">The share row</div>
+          <div id="cold-b" class="caps">was incomplete.</div>
+          <div id="cold-k" class="kicker">iOS · Safari · Every link</div>
+        </div>
+      </section>
+
+      <!-- 2. The build: letterboxed cards on the hits -->
+      <div id="band" class="clip" data-start="2" data-duration="5.75" data-track-index="2"></div>
+      <pre id="diff" class="clip" data-layout-allow-overlap data-start="5.6" data-duration="1.8" data-track-index="3"></pre>
+      <section id="b1" class="scene clip" data-start="2" data-duration="1.8" data-track-index="4">
+        <div class="card"><div class="caps">This fall…</div></div>
+      </section>
+      <section id="b2" class="scene clip" data-start="3.8" data-duration="1.8" data-track-index="4">
+        <div class="card"><div class="caps">One dev.</div><div class="caps">One agent…</div></div>
+      </section>
+      <section id="b3" class="scene clip" data-start="5.6" data-duration="1.8" data-track-index="4">
+        <div class="card"><div class="caps">Zero lines</div><div class="caps">of Swift…</div></div>
+      </section>
+
+      <!-- 3. The reveal: the real take on a standalone simulator build -->
+      <div id="dev-wrap">
+        <div
+          id="dev-host"
+          data-composition-id="device-frame-stage"
+          data-composition-src="compositions/components/device-frame-stage.html"
+          data-start="7.75"
+          data-duration="7.25"
+          data-track-index="5"
+          data-width="1080"
+          data-height="1240"
+        ></div>
+      </div>
+      <div id="label-scrim" class="clip" data-start="7.75" data-duration="7.25" data-track-index="6"></div>
+      <div id="l1" class="label caps clip" data-start="7.9" data-duration="2" data-track-index="6">Safari. Share.</div>
+      <div id="l2" class="label caps clip" data-start="9.9" data-duration="1.45" data-track-index="6">
+        <span><em>Tardy</em> is in the row.</span>
+      </div>
+      <div id="l3" class="label caps clip" data-start="11.35" data-duration="2.05" data-track-index="6">Your agents first.</div>
+      <div id="l4" class="label caps clip" data-start="13.4" data-duration="1.6" data-track-index="6">One tap. Sent.</div>
+
+      <!-- Letterbox bars over everything until they open on the reveal -->
+      <div id="bars" class="clip" data-start="2" data-duration="6.6" data-track-index="7">
+        <div id="bar-top"></div>
+        <div id="bar-bot"></div>
+      </div>
+      <div id="grain-overlay" class="clip" data-start="0" data-duration="8.2" data-track-index="8" style="position: absolute; inset: 0; pointer-events: none; overflow: hidden">
+        <div class="grain-texture"></div>
+      </div>
+
+      <!-- 4. Title card: the release date is the merge date -->
+      <section id="title" class="scene clip" data-start="15" data-duration="4.1" data-track-index="9">
+        <div id="title-wrap">
+          <div id="title-a" class="caps">Open in</div>
+          <div id="title-b" class="caps">Tardy</div>
+          <div id="release" class="caps">In main October 1</div>
+          <div id="billing">
+            <div>Directed by <b>orangej20</b></div>
+            <div>Written with <b>Claude Opus 5.5</b></div>
+            <div><b>10</b> files · <b>+203 −75</b> · <b>401</b> tests passing</div>
+            <div>Pull request <b>#16</b> · zero lines of Swift</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. Tag -->
+      <section id="tag" class="scene clip" data-start="19.1" data-duration="2.9" data-track-index="9">
+        <div id="tag-wrap">
+          <div id="tag-line"><div>Real followers,</div><div>real friends.</div></div>
+          <div id="tag-stay">Stay Tardy.</div>
+          <img id="wordmark" src="assets/wordmark.png" alt="tardy" />
+        </div>
+      </section>
+
+      <!-- Score: synthesized by build-audio.sh. Silence beat 7.4-7.75 is deliberate (< 0.5s). -->
+      <audio id="drone-a" src="assets/score/drone.wav" data-start="0" data-duration="7.4" data-track-index="20" data-volume="0.55"></audio>
+      <audio
+        id="drone-b"
+        src="assets/score/drone.wav"
+        data-start="7.75"
+        data-media-start="7.75"
+        data-duration="14.25"
+        data-track-index="20"
+        data-automation='{"version":1,"lanes":[{"target":"volume","points":[{"t":0,"v":0.7},{"t":2,"v":0.4},{"t":7.25,"v":0.45},{"t":11.35,"v":0.55},{"t":14.25,"v":0.1}]}]}'
+      ></audio>
+      <audio id="hit-0" src="assets/score/hit.wav" data-start="0" data-duration="1.8" data-track-index="21" data-volume="1"></audio>
+      <audio id="hit-1" src="assets/score/hit.wav" data-start="2" data-duration="1.8" data-track-index="21" data-volume="0.9"></audio>
+      <audio id="hit-2" src="assets/score/hit.wav" data-start="3.8" data-duration="1.8" data-track-index="21" data-volume="0.95"></audio>
+      <audio id="hit-3" src="assets/score/hit.wav" data-start="5.6" data-duration="1.8" data-track-index="21" data-volume="1"></audio>
+      <audio id="riser" src="assets/score/riser.wav" data-start="5.6" data-duration="1.8" data-track-index="22" data-volume="0.9"></audio>
+      <audio id="braam-1" src="assets/score/braam.wav" data-start="7.75" data-duration="3.6" data-track-index="23" data-volume="1.6"></audio>
+      <audio id="hit-4" src="assets/score/hit.wav" data-start="7.75" data-duration="1.8" data-track-index="21" data-volume="0.8"></audio>
+      <audio id="braam-2" src="assets/score/braam.wav" data-start="15" data-duration="3.6" data-track-index="23" data-volume="1.5"></audio>
+      <audio id="bell-1" src="assets/sfx/impactBell_heavy_000.ogg" data-start="15" data-duration="3.5" data-track-index="24" data-volume="0.7"></audio>
+      <audio id="bell-2" src="assets/sfx/impactBell_heavy_000.ogg" data-start="19.1" data-duration="2.9" data-track-index="24" data-volume="0.45"></audio>
+      <!-- Clicks on the real taps in the take (share, Tardy, agent, Send) -->
+      <audio id="tap-1" src="assets/sfx/click_002.ogg" data-start="8.75" data-track-index="25" data-volume="0.8"></audio>
+      <audio id="tap-2" src="assets/sfx/click_004.ogg" data-start="10.1" data-track-index="25" data-volume="0.8"></audio>
+      <audio id="tap-3" src="assets/sfx/click_002.ogg" data-start="11.45" data-track-index="25" data-volume="0.8"></audio>
+      <audio id="tap-4" src="assets/sfx/click_004.ogg" data-start="13.65" data-track-index="25" data-volume="0.8"></audio>
+    </div>
+
+    <script>
+      // The real mobile/app.json hunk from PR #16 (7526b47), typed out behind "Zero lines of Swift".
+      const DIFF = [
+        "mobile/app.json",
+        '-      "expo-notifications"',
+        '+      "expo-notifications",',
+        "+      [",
+        '+        "expo-share-intent",',
+        "+        {",
+        '+          "iosShareExtensionName": "Open in Tardy",',
+        '+          "iosActivationRules": {',
+        '+            "NSExtensionActivationSupportsWebURL…": 1,',
+        '+            "NSExtensionActivationSupportsText": true',
+        "+          },",
+        "+        }",
+        "+      ]",
+      ].join("\n");
+      const diffEl = document.getElementById("diff");
+      const typed = { n: 0 };
+      function paintDiff() {
+        const shown = DIFF.slice(0, Math.round(typed.n));
+        const nl = shown.indexOf("\n");
+        diffEl.innerHTML = "";
+        const head = document.createElement("span");
+        head.className = "file";
+        head.textContent = nl < 0 ? shown : shown.slice(0, nl + 1);
+        diffEl.appendChild(head);
+        if (nl >= 0) diffEl.appendChild(document.createTextNode(shown.slice(nl + 1)));
+      }
+      paintDiff();
+
+      const tl = gsap.timeline({ paused: true });
+
+      // 1. Cold open: card is up by 0.3s (hook at 0.5s), holds. // beat-locked: hit 0.0
+      tl.fromTo("#cold-a", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.3, ease: "power3.out" }, 0.0);
+      tl.fromTo("#cold-b", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.3, ease: "power3.out" }, 0.08);
+      tl.fromTo("#cold-k", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 0.5);
+      tl.fromTo("#cold .card", { scale: 1 }, { scale: 1.04, duration: 2, ease: "none" }, 0);
+
+      // 2. Build cards slam in on each hit, then drift (trailer push). // beat-locked: 2.0, 3.8, 5.6
+      [["#b1", 2.0], ["#b2", 3.8], ["#b3", 5.6]].forEach(([id, t]) => {
+        tl.fromTo(`${id} .card`, { scale: 1.18, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.22, ease: "power4.out" }, t);
+        tl.to(`${id} .card`, { scale: 0.96, duration: 1.5, ease: "none" }, t + 0.22);
+      });
+      tl.fromTo("#bar-top", { y: -734 }, { y: 0, duration: 0.35, ease: "power3.out" }, 2.0);
+      tl.fromTo("#bar-bot", { y: 734 }, { y: 0, duration: 0.35, ease: "power3.out" }, 2.0);
+      tl.fromTo(typed, { n: 0 }, { n: DIFF.length, duration: 1.55, ease: "none", onUpdate: paintDiff }, 5.6);
+
+      // 3. Reveal: bars open on the braam, device rises (its own IN), labels on the taps. // beat-locked: braam 7.75
+      tl.to("#bar-top", { y: -740, duration: 0.6, ease: "power3.inOut" }, 7.75);
+      tl.to("#bar-bot", { y: 740, duration: 0.6, ease: "power3.inOut" }, 7.75);
+      tl.to("#grain-overlay .grain-texture", { opacity: 0, duration: 0.4 }, 7.75);
+      ["#l1", "#l2", "#l3", "#l4"].forEach((id, i) => {
+        const t = [7.9, 9.9, 11.35, 13.4][i];
+        tl.fromTo(id, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.25, ease: "power2.out" }, t);
+      });
+      // Punch in on the share row while Tardy appears in it, then back out for the sheet.
+      tl.fromTo("#dev-wrap", { scale: 1 }, { scale: 1.5, duration: 0.6, ease: "power2.inOut" }, 9.3);
+      tl.to("#dev-wrap", { scale: 1, duration: 0.5, ease: "power2.inOut" }, 10.45);
+      // Second punch: the sheet (Your agents, the grant line, Send). Origin moves while scale is 1, so no jump.
+      tl.set("#dev-wrap", { transformOrigin: "540px 1323px" }, 11.0);
+      tl.to("#dev-wrap", { scale: 1.3, duration: 0.6, ease: "power2.inOut" }, 11.3);
+      // Zoom-blur out of the phone into the title.
+      tl.fromTo("#dev-wrap", { opacity: 1, filter: "blur(0px)" }, { scale: 2.6, opacity: 0, filter: "blur(18px)", duration: 0.45, ease: "power3.in", immediateRender: false }, 14.6);
+
+      // 4. Title: push in from blur, hold >= 3s. // beat-locked: braam 15.0
+      tl.fromTo("#title-wrap", { scale: 1.5, opacity: 0, filter: "blur(24px)" }, { scale: 1, opacity: 1, filter: "blur(0px)", duration: 0.5, ease: "power3.out" }, 15.0);
+      tl.to("#title-wrap", { scale: 1.04, duration: 3.3, ease: "none" }, 15.5);
+      tl.fromTo("#billing", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 15.9);
+      tl.to("#title-wrap", { opacity: 0, duration: 0.25 }, 18.9);
+
+      // 5. Tag. // beat-locked: bell 19.1
+      tl.fromTo("#tag-line", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 19.1);
+      tl.fromTo("#tag-stay", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 19.3);
+      tl.fromTo("#wordmark", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.5, ease: "power3.out" }, 19.05);
+
+      // Grain jitter, stepped and seekable (replaces the component's infinite CSS animation).
+      for (let i = 0; i < 82; i++) {
+        tl.set("#grain-overlay .grain-texture", { x: ((i * 37) % 11) * 9 - 45, y: ((i * 53) % 13) * 7 - 42 }, i * 0.1);
+      }
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

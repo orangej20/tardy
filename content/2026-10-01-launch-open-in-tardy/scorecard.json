@@ -1,0 +1,38 @@
+{
+  "rubric": "v1",
+  "run": "content/2026-10-01-launch-open-in-tardy",
+  "type": "launch",
+  "video_sha256": "55cc96635ae71f841649aa1660c4a941a94bb35193b16c2bb8043b136e9d6191",
+  "duration_s": 22.0,
+  "graded_at": "2026-10-01T10:07:22Z",
+  "grader": "Claude Opus 5.5 subagent, fresh context",
+  "gates": {
+    "technical": { "pass": true, "evidence": "check.sh 15 25: all 10 lines PASS (1080x1920, 30/1, audio, 22.0s, no black/silence >= 0.5s, poster, hyperframes check, palette, evidence)" },
+    "truth": { "pass": true, "evidence": "Transcribed 14 on-screen lines, all map to facts.md. Spot-checked: `git show 7526b47` (No first-party Swift, expo-share-intent, Co-Authored-By Claude Opus 5.5, app.json hunk matches the typed diff incl. \"iosShareExtensionName\": \"Open in Tardy\"); `git diff --shortstat 73bdafb^1 73bdafb` = 10 files, +203 -75; `gh pr view 16` (as orangej20) mergedAt 2026-10-01T08:32:13Z, body says 401 tests pass and describes the exact recorded flow. Caveats: the 1.0-2.0s subtitle 'IOS · SAFARI · EVERY LINK' is not its own facts.md line (PR body supports 'any link'); the sign-off source docs/brand/BRAND.md is untracked in this worktree (README.md:22 carries the same line)." },
+    "originals": { "pass": true, "evidence": "Generic trailer archetype only: no narrator voice, original ffmpeg-synthesized score (build-audio.sh) + CC0 Kenney SFX, no film logos/titles. iOS share sheet and Safari appear only as the real system UI in the capture." },
+    "privacy": { "pass": true, "evidence": "Only example.com, public handle orangej20, fixture agents/people (fable.quotes, opus.backend, sonnet.ui, avery, bom.bot). No emails, secrets, bundle IDs, internal URLs, or private repo names on screen." }
+  },
+  "scores": {
+    "hook": { "score": 3, "evidence": "hook-0.5s: 'THE SHARE ROW WAS INCOMPLETE.' already on screen over a sub hit; specific to the share extension and dead serious, but ~60px text on an empty frame and nothing says tardy until 9.9s." },
+    "message": { "score": 3, "evidence": "Cold viewer gets 'share a link from Safari to Tardy, your agents come first, one tap sends' from the labels at 7.9-15.0 and the title 'OPEN IN TARDY' at 15.0. Why it matters (the agent starts a work chat with the link) only lives in the tiny grant line in-app at 13.6s." },
+    "proof": { "score": 4, "evidence": "7.75-15.0 is a real simulator recording of the standalone build, zoomed to fill (full-9.8: Tardy icon in the iOS share row; full-13.6: Tardy sheet, Your agents, grant line, Send; 14.0: '✓ Sent'). Real app.json hunk types out at 5.6-7.4." },
+    "type_fit": { "score": 3, "evidence": "All five beats present (cold open, THIS FALL / ONE DEV. ONE AGENT / ZERO LINES OF SWIFT on hits, real reveal, title 15.0-19.1 = 4.1s, tag). Gravity-vs-size joke lands, sharpest in the credits block (p80-17.60s: '10 FILES · +203 −75 · 401 TESTS PASSING'). Letterbox reads weakly: bars and band are both grained near-black (full-6.6), so the 7.75-8.6 'bars slide away' barely registers." },
+    "brand": { "score": 4, "evidence": "Yellow only on the hero (title TARDY, 'TARDY' in label 2, 'Stay Tardy.', the app's Send button); alarm red only on the wordmark dot; wordmark cropped from the app; BRAND sign-off verbatim (p90-19.80s). Condensed trailer caps are a deliberate genre choice, palette all theme tokens per check.sh." },
+    "pacing": { "score": 3, "evidence": "Cuts land on the score grid (0, 2.0, 3.8, 5.6, 7.75, 15.0, 19.1); labels hold 1.45-2.05s for 3-5 words; 0.35s silence beat before the reveal. Slack at the end: 7s of static cards (title 15.0-19.1, tag 19.1-22.0) is a third of the runtime; also 7.75-9.3 is Safari's page menu, not the share action." },
+    "sound": { "score": 3, "evidence": "Clean: max -1.6 dB, mean -17.4 dB, no clipping; hits at 0/2.0/3.8/5.6 (RMS ~-8 dB), silence 7.40-7.75, braam on 7.75, clicks on taps (~10.1, 11.5, 13.65), braam+bell on 15.0. Works fully muted (every beat is on-screen text). But the reveal is the quietest section (RMS -21 to -25 dB at 9-15s vs ~-18 in the build): the bed never 'opens up'." },
+    "craft": { "score": 3, "evidence": "No typos or overflow; labels at y~245-305 and title/credits inside the safe area. Minor flaws: example.com renders in Chinese then French (simulator locale) 7.75-10.5 (full-9.8); 'TARDY IS IN THE ROW.' still up over the already-open Tardy sheet ~10.4-11.35; device frame bottom edge dips to y~1505 (into the caption zone) 11.4-15.0, chrome only, Send button stays above 1440." }
+  },
+  "limits_pushed": [
+    { "move": "Real motion from the app (simulator recording, speed-ramped, device-frame-stage)", "result": "landed" },
+    { "move": "Procedural visuals: real app.json diff types itself out behind card 3", "result": "weak" },
+    { "move": "Letterbox that opens (hand-built 2.39:1 bars)", "result": "weak" },
+    { "move": "Original synthesized trailer score (hits, riser, braam)", "result": "landed" }
+  ],
+  "total": 81.25,
+  "verdict": "ship",
+  "fixes": [
+    "7.75-15.0 (reveal): the bed drops instead of opening up (RMS -21 to -25 dB vs ~-18 in the build). Raise drone-b / braam-1 tail 4-6 dB or add a sustained swell under the take so the reveal is the loudest-feeling section before the title braam at 15.0.",
+    "2.0-8.6 (build + reveal): make the letterbox read. Bars and the band are both grained near-black (full-6.6), so the bars sliding away at 7.75 is nearly invisible. Make the bars flat neutral black with no grain and keep grain/lift on the band only; also raise the typed diff (5.6-7.4) to ~50% opacity and keep the 'iosShareExtensionName: \"Open in Tardy\"' line clear of the card text.",
+    "7.75-11.35 (Safari take + labels): re-record with the simulator in English so example.com isn't Chinese/French, start the take at the Share tap rather than the page menu (cuts ~1s of slack, 7.75-9.3), and move label l2 'TARDY IS IN THE ROW.' to ~9.6-10.4 so it sits over the share row, not the opened sheet. While there, add 'every link' (1.0-2.0 subtitle) to facts.md with the PR #16 body as source."
+  ]
+}
