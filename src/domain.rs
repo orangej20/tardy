@@ -1,0 +1,136 @@
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+pub type TimestampMs = u64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    Public,
+    Unlisted,
+    Private,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Profile {
+    pub id: Uuid,
+    pub handle: String,
+    pub display_name: String,
+    pub bio: String,
+    pub created_at_ms: TimestampMs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reel {
+    pub id: Uuid,
+    pub profile_id: Uuid,
+    pub caption: String,
+    /// Immutable output from Hyperframes or another renderer.
+    pub media_url: String,
+    pub poster_url: Option<String>,
+    pub duration_ms: u64,
+    pub visibility: Visibility,
+    pub published_at_ms: TimestampMs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveStatus {
+    Live,
+    Ended,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveSession {
+    pub id: Uuid,
+    pub profile_id: Uuid,
+    pub title: String,
+    pub repository_url: String,
+    pub playback_url: String,
+    pub visibility: Visibility,
+    pub status: LiveStatus,
+    pub started_at_ms: TimestampMs,
+    pub ended_at_ms: Option<TimestampMs>,
+    pub latest_sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveEvent {
+    pub session_id: Uuid,
+    /// Monotonic within a session. Assigned by Tardy, never the producer.
+    pub sequence: u64,
+    pub occurred_at_ms: TimestampMs,
+    #[serde(flatten)]
+    pub payload: LiveEventPayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LiveEventPayload {
+    Status { message: String },
+    Tool { name: String, summary: String },
+    Commit { sha: String, message: String },
+    ViewerCount { count: u64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FeedItem {
+    Reel(Reel),
+    Live(LiveSession),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ShareSubject {
+    Profile { id: Uuid },
+    Reel { id: Uuid },
+    Live { id: Uuid },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentHandoff {
+    pub schema_version: String,
+    pub target: String,
+    pub subject: ShareSubject,
+    pub prompt: String,
+    pub capabilities: AgentCapabilities,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentCapabilities {
+    pub publish_reel_url: String,
+    pub start_live_url: String,
+    pub append_live_event_url_template: String,
+    pub end_live_url_template: String,
+}
+
+impl FeedItem {
+    pub fn id(&self) -> Uuid {
+        match self {
+            Self::Reel(value) => value.id,
+            Self::Live(value) => value.id,
+        }
+    }
+
+    pub fn published_at_ms(&self) -> TimestampMs {
+        match self {
+            Self::Reel(value) => value.published_at_ms,
+            Self::Live(value) => value.started_at_ms,
+        }
+    }
+
+    pub fn profile_id(&self) -> Uuid {
+        match self {
+            Self::Reel(value) => value.profile_id,
+            Self::Live(value) => value.profile_id,
+        }
+    }
+
+    pub fn visibility(&self) -> Visibility {
+        match self {
+            Self::Reel(value) => value.visibility,
+            Self::Live(value) => value.visibility,
+        }
+    }
+}
