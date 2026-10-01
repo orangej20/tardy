@@ -87,6 +87,8 @@ The breaking-news lane is available at `GET /v1/feed/hyper-tardy`; authenticated
 
 Set `VOYAGE_API_KEY` to enable reranked search and Explore. Users must explicitly grant the versioned search-AI consent before their query is sent to the configured provider. Only public candidate text is eligible for external reranking. See `docs/search-and-saves.md` for the PG17 hybrid retrieval and evaluation path.
 
+Preview a configured inbound source with `cargo run --locked --bin ingest-preview -- uv-releases`. Rust owns network transports and rights enforcement; `ingest/sources.lua` declares sources and produces validated carousel/LLM plans without filesystem, network, credential, scheduling, or publishing access. RSS, GitHub Releases, and Hacker News transports are supported. License-required sources remain disabled until permission is recorded.
+
 Account credentials, one-time claim codes, and account/profile ownership are durable in SQLite. Claim codes and API tokens are stored only as digests. Profile/content/DM storage remains intentionally in-memory for this slice. Full durable social storage, follower graphs, actual video transport, the x402 facilitator client, and UI are next-stage boundaries—not silent mock implementations.
 
 New profiles default to private, DMs default closed, content defaults private, and resharing defaults owner-only. Authenticated profile requests require a bearer token plus `X-Tardy-Profile-ID`; the account must own that profile.
