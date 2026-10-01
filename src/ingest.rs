@@ -83,6 +83,20 @@ pub struct TransformPlan {
     pub llm: Option<LlmPlan>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FetchCursor {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchBatch {
+    pub items: Vec<NormalizedItem>,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub not_modified: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum IngestError {
     #[error("invalid ingestion Lua: {0}")]
@@ -137,7 +151,7 @@ impl Ingestor {
         if source.rights.mode == RightsMode::RequiresLicense {
             return Err(IngestError::RequiresLicense);
         }
-        let items = self.fetch(&source).await?;
+        let items = self.fetch_source(&source).await?;
         items
             .iter()
             .map(|item| self.transform(&source, item))
@@ -164,27 +178,50 @@ impl Ingestor {
         Ok(plan)
     }
 
-    async fn fetch(&self, source: &SourceDefinition) -> Result<Vec<NormalizedItem>, IngestError> {
-        let mut items = match &source.transport {
-            Transport::Rss { url } => self.fetch_rss(source, url).await?,
+    pub async fn fetch_source(
+        &self,
+        source: &SourceDefinition,
+    ) -> Result<Vec<NormalizedItem>, IngestError> {
+        Ok(self
+            .fetch_source_conditional(source, &FetchCursor::default())
+            .await?
+            .items)
+    }
+
+    pub async fn fetch_source_conditional(
+        &self,
+        source: &SourceDefinition,
+        cursor: &FetchCursor,
+    ) -> Result<FetchBatch, IngestError> {
+        let mut batch = match &source.transport {
+            Transport::Rss { url } => self.fetch_rss(source, url, cursor).await?,
             Transport::GithubReleases { owner, repo } => {
-                self.fetch_github(source, owner, repo).await?
+                self.fetch_github(source, owner, repo, cursor).await?
             }
-            Transport::HackerNews { list } => self.fetch_hacker_news(source, list).await?,
+            Transport::HackerNews { list } => FetchBatch {
+                items: self.fetch_hacker_news(source, list).await?,
+                etag: None,
+                last_modified: None,
+                not_modified: false,
+            },
         };
-        items.truncate(source.limit.min(100));
-        Ok(items)
+        batch.items.truncate(source.limit.min(100));
+        Ok(batch)
     }
 
     async fn fetch_rss(
         &self,
         source: &SourceDefinition,
         url: &str,
-    ) -> Result<Vec<NormalizedItem>, IngestError> {
-        let bytes = self.get(url).await?;
-        let feed = feed_rs::parser::parse(bytes.as_slice())
+        cursor: &FetchCursor,
+    ) -> Result<FetchBatch, IngestError> {
+        let response = self.get_conditional(url, cursor).await?;
+        if response.not_modified {
+            return Ok(response.into_batch(Vec::new()));
+        }
+        let feed = feed_rs::parser::parse(response.body.as_slice())
             .map_err(|error| IngestError::InvalidResponse(error.to_string()))?;
-        Ok(feed
+        let items = feed
             .entries
             .into_iter()
             .filter_map(|entry| {
@@ -207,7 +244,8 @@ impl Ingestor {
                     facts: BTreeMap::new(),
                 })
             })
-            .collect())
+            .collect();
+        Ok(response.into_batch(items))
     }
 
     async fn fetch_github(
@@ -215,10 +253,16 @@ impl Ingestor {
         source: &SourceDefinition,
         owner: &str,
         repo: &str,
-    ) -> Result<Vec<NormalizedItem>, IngestError> {
+        cursor: &FetchCursor,
+    ) -> Result<FetchBatch, IngestError> {
         let url = format!("https://api.github.com/repos/{owner}/{repo}/releases?per_page=100");
-        let values: Vec<GithubRelease> = self.get_json(&url).await?;
-        Ok(values
+        let response = self.get_conditional(&url, cursor).await?;
+        if response.not_modified {
+            return Ok(response.into_batch(Vec::new()));
+        }
+        let values: Vec<GithubRelease> = serde_json::from_slice(&response.body)
+            .map_err(|error| IngestError::InvalidResponse(error.to_string()))?;
+        let items = values
             .into_iter()
             .filter(|value| !value.draft)
             .map(|value| NormalizedItem {
@@ -234,7 +278,8 @@ impl Ingestor {
                     ("prerelease".into(), value.prerelease.to_string()),
                 ]),
             })
-            .collect())
+            .collect();
+        Ok(response.into_batch(items))
     }
 
     async fn fetch_hacker_news(
@@ -287,23 +332,63 @@ impl Ingestor {
     }
 
     async fn get(&self, url: &str) -> Result<Vec<u8>, IngestError> {
-        let response = self
-            .client
-            .get(url)
+        Ok(self
+            .get_conditional(url, &FetchCursor::default())
+            .await?
+            .body)
+    }
+
+    async fn get_conditional(
+        &self,
+        url: &str,
+        cursor: &FetchCursor,
+    ) -> Result<HttpPayload, IngestError> {
+        let mut request = self.client.get(url);
+        if let Some(etag) = &cursor.etag {
+            request = request.header(reqwest::header::IF_NONE_MATCH, etag);
+        }
+        if let Some(last_modified) = &cursor.last_modified {
+            request = request.header(reqwest::header::IF_MODIFIED_SINCE, last_modified);
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| IngestError::Transport(error.to_string()))?;
+        let not_modified = response.status() == reqwest::StatusCode::NOT_MODIFIED;
+        let etag = response
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let last_modified = response
+            .headers()
+            .get(reqwest::header::LAST_MODIFIED)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        if not_modified {
+            return Ok(HttpPayload {
+                body: Vec::new(),
+                etag,
+                last_modified,
+                not_modified,
+            });
+        }
         if !response.status().is_success() {
             return Err(IngestError::Transport(format!(
                 "HTTP {}",
                 response.status()
             )));
         }
-        Ok(response
-            .bytes()
-            .await
-            .map_err(|error| IngestError::Transport(error.to_string()))?
-            .to_vec())
+        Ok(HttpPayload {
+            body: response
+                .bytes()
+                .await
+                .map_err(|error| IngestError::Transport(error.to_string()))?
+                .to_vec(),
+            etag,
+            last_modified,
+            not_modified,
+        })
     }
 
     async fn get_json<T: for<'de> Deserialize<'de>>(&self, url: &str) -> Result<T, IngestError> {
@@ -318,6 +403,24 @@ fn sandbox() -> Result<Lua, mlua::Error> {
         StdLib::TABLE | StdLib::STRING | StdLib::MATH,
         Default::default(),
     )
+}
+
+struct HttpPayload {
+    body: Vec<u8>,
+    etag: Option<String>,
+    last_modified: Option<String>,
+    not_modified: bool,
+}
+
+impl HttpPayload {
+    fn into_batch(self, items: Vec<NormalizedItem>) -> FetchBatch {
+        FetchBatch {
+            items,
+            etag: self.etag,
+            last_modified: self.last_modified,
+            not_modified: self.not_modified,
+        }
+    }
 }
 
 #[derive(Deserialize)]

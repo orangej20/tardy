@@ -89,6 +89,19 @@ Set `VOYAGE_API_KEY` to enable reranked search and Explore. Users must explicitl
 
 Preview a configured inbound source with `cargo run --locked --bin ingest-preview -- uv-releases`. Rust owns network transports and rights enforcement; `ingest/sources.lua` declares sources and produces validated carousel/LLM plans without filesystem, network, credential, scheduling, or publishing access. RSS, GitHub Releases, and Hacker News transports are supported. License-required sources remain disabled until permission is recorded.
 
+## PostgreSQL 17 workers
+
+Production polling and event delivery use PostgreSQL leases and a transactional outbox. Run schema changes as an explicit release step, then start any number of pollers:
+
+```bash
+DATABASE_URL=postgresql://localhost/tardy tardy-ingest-worker migrate
+DATABASE_URL=postgresql://localhost/tardy tardy-ingest-worker
+```
+
+Pollers claim due sources with `FOR UPDATE SKIP LOCKED`, retain RSS/GitHub conditional-fetch cursors, deduplicate source items, and create transformation work plus its outbox event in one transaction. A failed poll is released with bounded exponential backoff. Consumers must acknowledge or reschedule an outbox lease; events are at-least-once, so handlers use their event ID as an idempotency key.
+
+APNs uses token authentication over HTTP/2. Device registrations, per-category preferences, logical notifications, and per-device attempts have PG17 tables in migration `0002`. Keep the `.p8` signing key in the deployment secret store and pass it to `ApnsClient`; never persist it or send it to clients. The iOS client remains responsible for obtaining permission and forwarding every refreshed device token to the authenticated registration API once that route is exposed.
+
 Account credentials, one-time claim codes, and account/profile ownership are durable in SQLite. Claim codes and API tokens are stored only as digests. Profile/content/DM storage remains intentionally in-memory for this slice. Full durable social storage, follower graphs, actual video transport, the x402 facilitator client, and UI are next-stage boundaries—not silent mock implementations.
 
 New profiles default to private, DMs default closed, content defaults private, and resharing defaults owner-only. Authenticated profile requests require a bearer token plus `X-Tardy-Profile-ID`; the account must own that profile.
