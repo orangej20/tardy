@@ -13,6 +13,9 @@ use crate::push::{NotificationPreference, PgPushStore, PushDevice, PushError, Re
 use crate::ranking::LuaRanker;
 use crate::search::{SearchError, SearchService};
 use crate::store::{MemoryStore, NewLive, NewProfile, NewReel, Store, StoreError};
+use crate::subscriptions::{
+    FeedEvent, NewSubscription, PgSubscriptionStore, Subscription, SubscriptionError,
+};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -34,6 +37,7 @@ pub struct AppState {
     pub search: Arc<SearchService>,
     pub push: Option<Arc<PgPushStore>>,
     pub ads: Option<Arc<AdsRuntime>>,
+    pub subscriptions: Option<Arc<PgSubscriptionStore>>,
 }
 
 pub struct AdsRuntime {
@@ -57,6 +61,7 @@ impl AppState {
             search: Arc::new(SearchService::disabled()),
             push: None,
             ads: None,
+            subscriptions: None,
         })
     }
 
@@ -74,6 +79,7 @@ impl AppState {
             search: Arc::new(SearchService::from_env()?),
             push: None,
             ads: None,
+            subscriptions: None,
         })
     }
 
@@ -84,6 +90,11 @@ impl AppState {
 
     pub fn with_ads(mut self, ads: AdsRuntime) -> Self {
         self.ads = Some(Arc::new(ads));
+        self
+    }
+
+    pub fn with_subscriptions(mut self, value: PgSubscriptionStore) -> Self {
+        self.subscriptions = Some(Arc::new(value));
         self
     }
 }
@@ -143,10 +154,77 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/v1/ad-funding-intents/{id}/settle",
             post(settle_ad_funding),
         )
+        .route("/v1/feed-subscriptions", post(create_feed_subscription))
+        .route(
+            "/v1/feed-subscriptions/{id}",
+            axum::routing::delete(delete_feed_subscription),
+        )
+        .route(
+            "/v1/feed-subscriptions/{id}/events",
+            get(poll_feed_subscription),
+        )
         .with_state(state)
         .layer(middleware::from_fn(move |request, next| {
             crate::metrics::track(metrics.clone(), request, next)
         }))
+}
+
+async fn create_feed_subscription(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<NewSubscription>,
+) -> Result<(StatusCode, Json<Subscription>), ApiError> {
+    let account = authenticated_account(&state, &headers)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(subscription_store(&state)?.create(account, body).await?),
+    ))
+}
+async fn delete_feed_subscription(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    subscription_store(&state)?
+        .delete(authenticated_account(&state, &headers)?, id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+#[derive(Deserialize)]
+struct SubscriptionQuery {
+    #[serde(default)]
+    after: i64,
+    #[serde(default = "default_subscription_limit")]
+    limit: i64,
+}
+fn default_subscription_limit() -> i64 {
+    50
+}
+async fn poll_feed_subscription(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<SubscriptionQuery>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<FeedEvent>>, ApiError> {
+    if query.after < 0 || !(1..=100).contains(&query.limit) {
+        return Err(ApiError::bad_request("invalid cursor or limit"));
+    }
+    Ok(Json(
+        subscription_store(&state)?
+            .poll(
+                authenticated_account(&state, &headers)?,
+                id,
+                query.after,
+                query.limit,
+            )
+            .await?,
+    ))
+}
+fn subscription_store(state: &AppState) -> Result<&PgSubscriptionStore, ApiError> {
+    state.subscriptions.as_deref().ok_or_else(|| ApiError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        message: "feed subscriptions are not configured".into(),
+    })
 }
 
 async fn create_ad_campaign(
@@ -370,6 +448,11 @@ async fn publish_reel(
             published_at_ms: now_ms()?,
         },
     )?;
+    if value.visibility == Visibility::Public {
+        if let Some(subscriptions) = &state.subscriptions {
+            subscriptions.publish_reel(&value).await?;
+        }
+    }
     Ok((StatusCode::CREATED, Json(value)))
 }
 
@@ -386,16 +469,26 @@ async fn record_engagement(
     headers: HeaderMap,
     Json(body): Json<RecordEngagement>,
 ) -> Result<impl IntoResponse, ApiError> {
-    Ok((
-        StatusCode::CREATED,
-        Json(state.store.record_engagement(
-            authenticated_actor(&state, &headers)?,
-            id,
-            body.event_id,
-            body.kind,
-            now_ms()?,
-        )?),
-    ))
+    let receipt = state.store.record_engagement(
+        authenticated_actor(&state, &headers)?,
+        id,
+        body.event_id,
+        body.kind,
+        now_ms()?,
+    )?;
+    if receipt.counted {
+        if let Some(subscriptions) = &state.subscriptions {
+            if let Some(item) = state
+                .store
+                .hyper_tardy(None, now_ms()?, 100)?
+                .into_iter()
+                .find(|item| item.reel.id == id)
+            {
+                subscriptions.publish_hyper_tardy(&item).await?;
+            }
+        }
+    }
+    Ok((StatusCode::CREATED, Json(receipt)))
 }
 
 async fn save_post(
@@ -1164,6 +1257,23 @@ impl From<AdsError> for ApiError {
                 Self::not_found("ads resource not found")
             }
             AdsError::Database(_) => Self::internal(value.to_string()),
+        }
+    }
+}
+
+impl From<SubscriptionError> for ApiError {
+    fn from(value: SubscriptionError) -> Self {
+        match value {
+            SubscriptionError::Invalid => Self::bad_request(value.to_string()),
+            SubscriptionError::NotFound => Self::not_found(value.to_string()),
+            SubscriptionError::SigningUnavailable => Self {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                message: value.to_string(),
+            },
+            SubscriptionError::Database(sqlx::Error::RowNotFound) => {
+                Self::not_found("subscription not found")
+            }
+            SubscriptionError::Database(_) => Self::internal(value.to_string()),
         }
     }
 }

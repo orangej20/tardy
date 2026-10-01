@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tardy::ads::{HttpX402Facilitator, PaymentRequirements, PgAdsStore};
 use tardy::api::AdsRuntime;
 use tardy::push::PgPushStore;
+use tardy::subscriptions::PgSubscriptionStore;
 use tardy::{AppState, router};
 
 #[tokio::main]
@@ -22,6 +23,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .connect(&database_url)
             .await?;
         state = state.with_push_store(PgPushStore::new(pool.clone()));
+        let subscription_base_url = state.public_base_url.clone();
+        state = state.with_subscriptions(PgSubscriptionStore::new(
+            pool.clone(),
+            subscription_base_url,
+            std::env::var("WEBHOOK_SIGNING_KEY")
+                .ok()
+                .map(String::into_bytes),
+        ));
         if let Ok(facilitator_url) = std::env::var("X402_FACILITATOR_URL") {
             let processor = HttpX402Facilitator::new(
                 facilitator_url,
@@ -29,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
             let atomic_per_budget_micro = required("X402_ATOMIC_PER_BUDGET_MICRO")?.parse()?;
             state = state.with_ads(AdsRuntime {
-                store: PgAdsStore::new(pool),
+                store: PgAdsStore::new(pool.clone()),
                 processor: Arc::new(processor),
                 requirement: PaymentRequirements {
                     scheme: std::env::var("X402_SCHEME").unwrap_or_else(|_| "exact".into()),

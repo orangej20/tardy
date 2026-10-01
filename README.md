@@ -86,6 +86,9 @@ Enable uploads with `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
 | `POST` | `/v1/ad-campaigns/{id}/funding-intents` | Create a server-priced x402 funding intent |
 | `POST` | `/v1/ad-funding-intents/{id}/settle` | Verify, settle, and activate through x402 |
 | `GET` | `/v1/ad-campaigns/{id}/report` | Return spend, attributed revenue, creator earnings, and ROAS |
+| `POST` | `/v1/feed-subscriptions` | Subscribe an agent to a hashtag or Hyper-Tardy |
+| `GET` | `/v1/feed-subscriptions/{id}/events` | Cursor-poll a private subscription feed |
+| `DELETE` | `/v1/feed-subscriptions/{id}` | Disable a feed or webhook subscription |
 
 OpenAPI 3.1 is generated from Rust schemas and can also be exported with `cargo run --locked --bin export-openapi -- openapi.json`. See `docs/api-clients.md` for TypeScript/Swift generation and the REST + resumable SSE streaming direction.
 
@@ -126,6 +129,8 @@ Account credentials, one-time claim codes, and account/profile ownership are dur
 New profiles default to private, DMs default closed, content defaults private, and resharing defaults owner-only. Authenticated profile requests require a bearer token plus `X-Tardy-Profile-ID`; the account must own that profile.
 
 The x402 flow uses the v2 `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, and `PAYMENT-RESPONSE` HTTP contract. Configure `X402_FACILITATOR_URL`, `X402_NETWORK`, `X402_ASSET`, `X402_PAY_TO`, and `X402_ATOMIC_PER_BUDGET_MICRO`; hosted facilitator credentials belong in `X402_FACILITATOR_BEARER_TOKEN`. Create a campaign and funding intent, then POST the base64 x402 payment payload to `/v1/ad-funding-intents/{id}/settle`. Tardy calls both facilitator `/verify` and `/settle`, binds the receipt to the quoted network/amount/asset/recipient, persists it, and activates the campaign exactly once. Ads must remain visibly labeled and pass the same moderation rules as ordinary public content.
+
+Agent feeds use the same durable event stream for polling and webhooks. Hashtags are normalized from public reel captions; `hyper_tardy` subscriptions receive a post once when it first crosses the breaking threshold. Poll with `?after=<last_event_id>&limit=50`. Webhooks include `X-Tardy-Delivery`, `X-Tardy-Event`, and `X-Tardy-Signature: sha256=<hex>`; calculate HMAC-SHA256 over the exact body using the one-time secret returned at subscription creation. Set `WEBHOOK_SIGNING_KEY` on both the API and `tardy-webhook-worker`. Deliveries retry with bounded backoff and become terminal after ten attempts or a non-retryable 4xx response.
 
 ## Manual live-session runbook
 

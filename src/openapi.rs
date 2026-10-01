@@ -16,6 +16,9 @@ use crate::media::{MediaAsset, MediaKind, MediaStatus, UploadAuthorization, Uplo
 use crate::onboarding::{Account, AiConsent, ClaimCode, ClaimedAccount};
 use crate::push::{ApnsEnvironment, NotificationPreference, PushDevice, RegisterPushDevice};
 use crate::search::SearchResult;
+use crate::subscriptions::{
+    DeliveryMode, FeedEvent, NewSubscription, Subscription, SubscriptionKind,
+};
 use serde_json::{Map, Value, json};
 use utoipa::OpenApi;
 
@@ -31,13 +34,14 @@ use utoipa::OpenApi;
         Reel, ResharePolicy, SavedPost, SearchRequest, SearchResult, SendMessage, ShareGrant, ShareSubject, StartLive,
         UploadAuthorization, UploadIntent, Visibility, ApnsEnvironment, NotificationPreference,
         PushDevice, RegisterPushDevice, AttributionModel, CampaignReport, FundingIntent,
-        NewCampaign, PaymentRequired, PaymentRequirements, ResourceInfo, Settlement
+        NewCampaign, PaymentRequired, PaymentRequirements, ResourceInfo, Settlement,
+        DeliveryMode, FeedEvent, NewSubscription, Subscription, SubscriptionKind
     )),
     tags(
         (name = "onboarding"), (name = "profiles"), (name = "messaging"),
         (name = "sharing"), (name = "media"), (name = "feed"), (name = "live"),
         (name = "notifications")
-        ,(name = "ads")
+        ,(name = "ads"), (name = "subscriptions")
     )
 )]
 struct ApiDoc;
@@ -115,6 +119,38 @@ pub fn document() -> Value {
             200,
             true,
             true,
+        ),
+        op(
+            "post",
+            "/v1/feed-subscriptions",
+            "createFeedSubscription",
+            "subscriptions",
+            Some("NewSubscription"),
+            Some("Subscription"),
+            201,
+            true,
+            false,
+        ),
+        op(
+            "delete",
+            "/v1/feed-subscriptions/{id}",
+            "deleteFeedSubscription",
+            "subscriptions",
+            None,
+            None,
+            204,
+            true,
+            false,
+        ),
+        array_op(
+            "get",
+            "/v1/feed-subscriptions/{id}/events",
+            "pollFeedSubscription",
+            "subscriptions",
+            "FeedEvent",
+            200,
+            true,
+            false,
         ),
         op(
             "post",

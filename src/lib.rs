@@ -13,5 +13,6 @@ pub mod push;
 pub mod ranking;
 pub mod search;
 pub mod store;
+pub mod subscriptions;
 
 pub use api::{AppState, router};
