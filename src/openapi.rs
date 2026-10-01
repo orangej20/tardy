@@ -1,3 +1,7 @@
+use crate::ads::{
+    AttributionModel, CampaignReport, FundingIntent, NewCampaign, PaymentRequired,
+    PaymentRequirements, ResourceInfo, Settlement,
+};
 use crate::api::{
     ClaimAgentCode, CreateProfile, CreateShare, CreateThread, ErrorBody, HandoffRequest,
     PublishReel, RecordEngagement, SearchRequest, SendMessage, StartLive,
@@ -10,6 +14,7 @@ use crate::domain::{
 };
 use crate::media::{MediaAsset, MediaKind, MediaStatus, UploadAuthorization, UploadIntent};
 use crate::onboarding::{Account, AiConsent, ClaimCode, ClaimedAccount};
+use crate::push::{ApnsEnvironment, NotificationPreference, PushDevice, RegisterPushDevice};
 use crate::search::SearchResult;
 use serde_json::{Map, Value, json};
 use utoipa::OpenApi;
@@ -24,11 +29,15 @@ use utoipa::OpenApi;
         LiveEvent, LiveEventPayload, LiveSession, LiveStatus, MediaAsset, MediaKind, MediaStatus,
         Profile, ProfilePrivacy, ProfileVisibility, PublicProfile, PublishReel, RecordEngagement,
         Reel, ResharePolicy, SavedPost, SearchRequest, SearchResult, SendMessage, ShareGrant, ShareSubject, StartLive,
-        UploadAuthorization, UploadIntent, Visibility
+        UploadAuthorization, UploadIntent, Visibility, ApnsEnvironment, NotificationPreference,
+        PushDevice, RegisterPushDevice, AttributionModel, CampaignReport, FundingIntent,
+        NewCampaign, PaymentRequired, PaymentRequirements, ResourceInfo, Settlement
     )),
     tags(
         (name = "onboarding"), (name = "profiles"), (name = "messaging"),
-        (name = "sharing"), (name = "media"), (name = "feed"), (name = "live")
+        (name = "sharing"), (name = "media"), (name = "feed"), (name = "live"),
+        (name = "notifications")
+        ,(name = "ads")
     )
 )]
 struct ApiDoc;
@@ -261,6 +270,50 @@ pub fn document() -> Value {
         ),
         op(
             "post",
+            "/v1/ad-campaigns",
+            "createAdCampaign",
+            "ads",
+            Some("NewCampaign"),
+            None,
+            201,
+            true,
+            true,
+        ),
+        op(
+            "post",
+            "/v1/ad-campaigns/{id}/funding-intents",
+            "createAdFundingIntent",
+            "ads",
+            None,
+            Some("FundingIntent"),
+            201,
+            true,
+            true,
+        ),
+        op(
+            "post",
+            "/v1/ad-funding-intents/{id}/settle",
+            "settleAdFunding",
+            "ads",
+            None,
+            Some("Settlement"),
+            200,
+            true,
+            true,
+        ),
+        op(
+            "get",
+            "/v1/ad-campaigns/{id}/report",
+            "getAdCampaignReport",
+            "ads",
+            None,
+            Some("CampaignReport"),
+            200,
+            true,
+            true,
+        ),
+        op(
+            "post",
             "/v1/ai-consents/search",
             "grantSearchAiConsent",
             "profiles",
@@ -367,6 +420,39 @@ pub fn document() -> Value {
             201,
             true,
             true,
+        ),
+        op(
+            "post",
+            "/v1/push/devices",
+            "registerPushDevice",
+            "notifications",
+            Some("RegisterPushDevice"),
+            Some("PushDevice"),
+            201,
+            true,
+            false,
+        ),
+        op(
+            "delete",
+            "/v1/push/devices/{id}",
+            "unregisterPushDevice",
+            "notifications",
+            None,
+            None,
+            204,
+            true,
+            false,
+        ),
+        op(
+            "put",
+            "/v1/push/preferences",
+            "setNotificationPreference",
+            "notifications",
+            Some("NotificationPreference"),
+            Some("NotificationPreference"),
+            200,
+            true,
+            false,
         ),
     ];
     let mut paths = Map::new();

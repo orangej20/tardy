@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{PgPool, Postgres, Transaction};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub const X402_VERSION: u8 = 2;
@@ -28,7 +29,7 @@ pub enum AdStatus {
     Rejected,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentRequired {
     pub x402_version: u8,
@@ -39,7 +40,7 @@ pub struct PaymentRequired {
     pub extensions: Map<String, Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceInfo {
     pub url: String,
@@ -47,7 +48,7 @@ pub struct ResourceInfo {
     pub mime_type: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentRequirements {
     pub scheme: String,
@@ -102,7 +103,7 @@ pub trait AdPaymentProcessor: Send + Sync {
     ) -> Result<Settlement, PaymentError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Settlement {
     pub transaction: String,
     pub network: String,
@@ -120,9 +121,160 @@ pub enum PaymentError {
     Settlement(String),
 }
 
+#[derive(Clone)]
+pub struct HttpX402Facilitator {
+    client: reqwest::Client,
+    base_url: String,
+    bearer_token: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FacilitatorRequest<'a> {
+    payment_payload: &'a Value,
+    payment_requirements: &'a PaymentRequirements,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyResponse {
+    is_valid: bool,
+    invalid_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SettleResponse {
+    success: bool,
+    transaction: Option<String>,
+    network: Option<String>,
+    payer: Option<String>,
+    error_reason: Option<String>,
+}
+
+impl HttpX402Facilitator {
+    pub fn new(
+        base_url: impl Into<String>,
+        bearer_token: Option<String>,
+    ) -> Result<Self, PaymentError> {
+        let base_url = base_url.into().trim_end_matches('/').to_owned();
+        if !base_url.starts_with("https://") && !base_url.starts_with("http://127.0.0.1") {
+            return Err(PaymentError::Verification(
+                "facilitator URL must use HTTPS (localhost is allowed for tests)".into(),
+            ));
+        }
+        Ok(Self {
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(20))
+                .build()
+                .map_err(|error| PaymentError::Verification(error.to_string()))?,
+            base_url,
+            bearer_token,
+        })
+    }
+
+    fn request(&self, path: &str) -> reqwest::RequestBuilder {
+        let request = self.client.post(format!("{}{path}", self.base_url));
+        match &self.bearer_token {
+            Some(token) => request.bearer_auth(token),
+            None => request,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AdPaymentProcessor for HttpX402Facilitator {
+    async fn verify_and_settle(
+        &self,
+        idempotency_key: Uuid,
+        payment_signature: &str,
+        requirement: &PaymentRequirements,
+    ) -> Result<Settlement, PaymentError> {
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(payment_signature)
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payment_signature))
+            .map_err(|_| PaymentError::Verification("PAYMENT-SIGNATURE is not base64".into()))?;
+        let payload: Value = serde_json::from_slice(&bytes)
+            .map_err(|_| PaymentError::Verification("PAYMENT-SIGNATURE is not JSON".into()))?;
+        let request = FacilitatorRequest {
+            payment_payload: &payload,
+            payment_requirements: requirement,
+        };
+        let verified = self
+            .request("/verify")
+            .header("idempotency-key", idempotency_key.to_string())
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| PaymentError::Verification(error.to_string()))?;
+        if !verified.status().is_success() {
+            return Err(PaymentError::Verification(format!(
+                "facilitator returned HTTP {}",
+                verified.status()
+            )));
+        }
+        let verified: VerifyResponse = verified
+            .json()
+            .await
+            .map_err(|error| PaymentError::Verification(error.to_string()))?;
+        if !verified.is_valid {
+            return Err(PaymentError::Verification(
+                verified
+                    .invalid_reason
+                    .unwrap_or_else(|| "invalid payment".into()),
+            ));
+        }
+        let settled = self
+            .request("/settle")
+            .header("idempotency-key", idempotency_key.to_string())
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| PaymentError::Settlement(error.to_string()))?;
+        if !settled.status().is_success() {
+            return Err(PaymentError::Settlement(format!(
+                "facilitator returned HTTP {}",
+                settled.status()
+            )));
+        }
+        let settled: SettleResponse = settled
+            .json()
+            .await
+            .map_err(|error| PaymentError::Settlement(error.to_string()))?;
+        if !settled.success {
+            return Err(PaymentError::Settlement(
+                settled
+                    .error_reason
+                    .unwrap_or_else(|| "settlement failed".into()),
+            ));
+        }
+        let network = settled
+            .network
+            .ok_or_else(|| PaymentError::Settlement("missing network".into()))?;
+        if network != requirement.network {
+            return Err(PaymentError::Settlement(
+                "settlement network mismatch".into(),
+            ));
+        }
+        Ok(Settlement {
+            transaction: settled
+                .transaction
+                .ok_or_else(|| PaymentError::Settlement("missing transaction".into()))?,
+            network,
+            payer: settled
+                .payer
+                .ok_or_else(|| PaymentError::Settlement("missing payer".into()))?,
+            amount: requirement.amount.clone(),
+            asset: requirement.asset.clone(),
+            pay_to: requirement.pay_to.clone(),
+        })
+    }
+}
+
 /// Money is always stored in integer micros of the campaign's ISO-4217 currency.
 /// This avoids floating-point drift and keeps provider settlement behind a boundary.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct NewCampaign {
     pub advertiser_profile_id: Uuid,
     pub name: String,
@@ -133,7 +285,7 @@ pub struct NewCampaign {
     pub boosted_reel_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AttributionModel {
     LastTouch,
@@ -206,7 +358,7 @@ pub struct NewAdEvent {
     pub metadata: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
 pub struct CampaignReport {
     pub campaign_id: Uuid,
     pub impressions: i64,
@@ -230,7 +382,7 @@ pub struct PgAdsStore {
     pool: PgPool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct FundingIntent {
     pub id: Uuid,
     pub campaign_id: Uuid,
@@ -254,6 +406,39 @@ impl PgAdsStore {
         .bind(value.attribution_model.as_str()).bind(value.boosted_reel_id)
         .execute(&self.pool).await?;
         Ok(id)
+    }
+
+    pub async fn campaign_owner_budget(&self, campaign_id: Uuid) -> Result<(Uuid, i64), AdsError> {
+        Ok(sqlx::query_as(
+            "SELECT advertiser_profile_id,budget_micros FROM ad_campaigns WHERE id=$1",
+        )
+        .bind(campaign_id)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    pub async fn funding_intent(&self, intent_id: Uuid) -> Result<FundingIntent, AdsError> {
+        let row: (Uuid, String, String, String, String, String, i64) = sqlx::query_as(
+            "SELECT campaign_id,scheme,network,amount,asset,pay_to,budget_credit_micros
+             FROM ad_funding_intents WHERE id=$1",
+        )
+        .bind(intent_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(FundingIntent {
+            id: intent_id,
+            campaign_id: row.0,
+            requirement: PaymentRequirements {
+                scheme: row.1,
+                network: row.2,
+                amount: row.3,
+                asset: row.4,
+                pay_to: row.5,
+                max_timeout_seconds: 60,
+                extra: Map::new(),
+            },
+            budget_credit_micros: row.6,
+        })
     }
 
     pub async fn create_funding_intent(
@@ -493,6 +678,7 @@ pub enum AdsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{Json, Router, routing::post};
 
     #[test]
     fn quote_rounds_impressions_up_and_uses_x402_v2_names() {
@@ -573,5 +759,55 @@ mod tests {
             })
             .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn http_facilitator_verifies_before_settling() {
+        use base64::Engine as _;
+        let app = Router::new()
+            .route(
+                "/verify",
+                post(|Json(body): Json<Value>| async move {
+                    assert_eq!(body["paymentRequirements"]["amount"], "1000");
+                    Json(serde_json::json!({"isValid": true, "payer": "0xpayer"}))
+                }),
+            )
+            .route(
+                "/settle",
+                post(|| async {
+                    Json(serde_json::json!({
+                        "success": true,
+                        "transaction": "0xtx",
+                        "network": "eip155:8453",
+                        "payer": "0xpayer"
+                    }))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let facilitator = HttpX402Facilitator::new(format!("http://{address}"), None).unwrap();
+        let requirement = PaymentRequirements {
+            scheme: "exact".into(),
+            network: "eip155:8453".into(),
+            amount: "1000".into(),
+            asset: "0xasset".into(),
+            pay_to: "0xmerchant".into(),
+            max_timeout_seconds: 300,
+            extra: Map::new(),
+        };
+        let signature = base64::engine::general_purpose::STANDARD.encode(
+            serde_json::to_vec(
+                &serde_json::json!({"x402Version": 2, "payload": {"signature": "0xsig"}}),
+            )
+            .unwrap(),
+        );
+        let receipt = facilitator
+            .verify_and_settle(Uuid::new_v4(), &signature, &requirement)
+            .await
+            .unwrap();
+        assert_eq!(receipt.transaction, "0xtx");
+        assert_eq!(receipt.amount, "1000");
+        assert_eq!(receipt.pay_to, "0xmerchant");
     }
 }

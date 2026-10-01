@@ -1,3 +1,7 @@
+use crate::ads::{
+    AdPaymentProcessor, AdsError, CampaignReport, FundingIntent, NewCampaign, PaymentRequired,
+    PaymentRequirements, PgAdsStore, ResourceInfo, X402_VERSION,
+};
 use crate::domain::{
     AgentCapabilities, AgentHandoff, EngagementKind, LiveEventPayload, ProfilePrivacy,
     ShareSubject, Visibility,
@@ -5,6 +9,7 @@ use crate::domain::{
 use crate::media::{MediaError, MediaService, UploadIntent};
 use crate::metrics::Metrics;
 use crate::onboarding::{AccountRegistry, OnboardingError};
+use crate::push::{NotificationPreference, PgPushStore, PushDevice, PushError, RegisterPushDevice};
 use crate::ranking::LuaRanker;
 use crate::search::{SearchError, SearchService};
 use crate::store::{MemoryStore, NewLive, NewProfile, NewReel, Store, StoreError};
@@ -27,6 +32,15 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     pub media: Arc<MediaService>,
     pub search: Arc<SearchService>,
+    pub push: Option<Arc<PgPushStore>>,
+    pub ads: Option<Arc<AdsRuntime>>,
+}
+
+pub struct AdsRuntime {
+    pub store: PgAdsStore,
+    pub processor: Arc<dyn AdPaymentProcessor>,
+    pub requirement: PaymentRequirements,
+    pub atomic_per_budget_micro: u64,
 }
 
 impl AppState {
@@ -41,6 +55,8 @@ impl AppState {
             metrics: Arc::new(Metrics::new()),
             media: Arc::new(MediaService::new(None)),
             search: Arc::new(SearchService::disabled()),
+            push: None,
+            ads: None,
         })
     }
 
@@ -56,7 +72,19 @@ impl AppState {
             metrics: Arc::new(Metrics::new()),
             media: Arc::new(MediaService::from_env()?),
             search: Arc::new(SearchService::from_env()?),
+            push: None,
+            ads: None,
         })
+    }
+
+    pub fn with_push_store(mut self, push: PgPushStore) -> Self {
+        self.push = Some(Arc::new(push));
+        self
+    }
+
+    pub fn with_ads(mut self, ads: AdsRuntime) -> Self {
+        self.ads = Some(Arc::new(ads));
+        self
     }
 }
 
@@ -99,10 +127,185 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/feed", get(feed))
         .route("/v1/feed/hyper-tardy", get(hyper_tardy_feed))
         .route("/v1/agent-handoffs", post(agent_handoff))
+        .route("/v1/push/devices", post(register_push_device))
+        .route(
+            "/v1/push/devices/{id}",
+            axum::routing::delete(unregister_push_device),
+        )
+        .route("/v1/push/preferences", put(set_notification_preference))
+        .route("/v1/ad-campaigns", post(create_ad_campaign))
+        .route(
+            "/v1/ad-campaigns/{id}/funding-intents",
+            post(create_ad_funding_intent),
+        )
+        .route("/v1/ad-campaigns/{id}/report", get(ad_campaign_report))
+        .route(
+            "/v1/ad-funding-intents/{id}/settle",
+            post(settle_ad_funding),
+        )
         .with_state(state)
         .layer(middleware::from_fn(move |request, next| {
             crate::metrics::track(metrics.clone(), request, next)
         }))
+}
+
+async fn create_ad_campaign(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<NewCampaign>,
+) -> Result<(StatusCode, Json<Uuid>), ApiError> {
+    let actor = authenticated_actor(&state, &headers)?;
+    if actor != body.advertiser_profile_id {
+        return Err(ApiError::forbidden(
+            "advertiser profile must match selected profile",
+        ));
+    }
+    let id = ads_runtime(&state)?.store.create_campaign(body).await?;
+    Ok((StatusCode::CREATED, Json(id)))
+}
+
+async fn create_ad_funding_intent(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<FundingIntent>), ApiError> {
+    let actor = authenticated_actor(&state, &headers)?;
+    let ads = ads_runtime(&state)?;
+    let (owner, budget_micros) = ads.store.campaign_owner_budget(campaign_id).await?;
+    if owner != actor {
+        return Err(ApiError::forbidden("campaign is owned by another profile"));
+    }
+    let amount = u128::try_from(budget_micros)
+        .ok()
+        .and_then(|budget| budget.checked_mul(u128::from(ads.atomic_per_budget_micro)))
+        .ok_or_else(|| {
+            ApiError::bad_request("campaign budget cannot be represented by payment rate")
+        })?;
+    let mut requirement = ads.requirement.clone();
+    requirement.amount = amount.to_string();
+    let intent = ads
+        .store
+        .create_funding_intent(campaign_id, requirement, budget_micros)
+        .await?;
+    Ok((StatusCode::CREATED, Json(intent)))
+}
+
+async fn settle_ad_funding(
+    State(state): State<Arc<AppState>>,
+    Path(intent_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    use base64::Engine as _;
+    let actor = authenticated_actor(&state, &headers)?;
+    let ads = ads_runtime(&state)?;
+    let intent = ads.store.funding_intent(intent_id).await?;
+    let (owner, _) = ads.store.campaign_owner_budget(intent.campaign_id).await?;
+    if owner != actor {
+        return Err(ApiError::forbidden("campaign is owned by another profile"));
+    }
+    let Some(signature) = headers
+        .get("payment-signature")
+        .and_then(|value| value.to_str().ok())
+    else {
+        let required = PaymentRequired {
+            x402_version: X402_VERSION,
+            error: "PAYMENT-SIGNATURE header is required".into(),
+            resource: ResourceInfo {
+                url: format!(
+                    "{}/v1/ad-funding-intents/{intent_id}/settle",
+                    state.public_base_url
+                ),
+                description: format!("Fund Tardy ad campaign {}", intent.campaign_id),
+                mime_type: "application/json".into(),
+            },
+            accepts: vec![intent.requirement],
+            extensions: serde_json::Map::new(),
+        };
+        let encoded = base64::engine::general_purpose::STANDARD.encode(
+            serde_json::to_vec(&required).map_err(|error| ApiError::internal(error.to_string()))?,
+        );
+        return Ok((
+            StatusCode::PAYMENT_REQUIRED,
+            [("payment-required", encoded)],
+            Json(required),
+        )
+            .into_response());
+    };
+    let receipt = ads
+        .store
+        .settle_funding(intent_id, signature, ads.processor.as_ref())
+        .await?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(
+        serde_json::to_vec(&receipt).map_err(|error| ApiError::internal(error.to_string()))?,
+    );
+    Ok((
+        StatusCode::OK,
+        [("payment-response", encoded)],
+        Json(receipt),
+    )
+        .into_response())
+}
+
+async fn ad_campaign_report(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<Json<CampaignReport>, ApiError> {
+    let actor = authenticated_actor(&state, &headers)?;
+    let ads = ads_runtime(&state)?;
+    let (owner, _) = ads.store.campaign_owner_budget(campaign_id).await?;
+    if owner != actor {
+        return Err(ApiError::forbidden("campaign is owned by another profile"));
+    }
+    Ok(Json(ads.store.campaign_report(campaign_id).await?))
+}
+
+fn ads_runtime(state: &AppState) -> Result<&AdsRuntime, ApiError> {
+    state.ads.as_deref().ok_or_else(|| ApiError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        message: "ads payments are not configured".into(),
+    })
+}
+
+async fn register_push_device(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<RegisterPushDevice>,
+) -> Result<(StatusCode, Json<PushDevice>), ApiError> {
+    let account_id = authenticated_account(&state, &headers)?;
+    let device = push_store(&state)?
+        .register_device(account_id, body)
+        .await?;
+    Ok((StatusCode::CREATED, Json(device)))
+}
+
+async fn unregister_push_device(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    push_store(&state)?
+        .unregister_device(authenticated_account(&state, &headers)?, id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn set_notification_preference(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<NotificationPreference>,
+) -> Result<Json<NotificationPreference>, ApiError> {
+    let account_id = authenticated_account(&state, &headers)?;
+    Ok(Json(
+        push_store(&state)?.set_preference(account_id, body).await?,
+    ))
+}
+
+fn push_store(state: &AppState) -> Result<&PgPushStore, ApiError> {
+    state.push.as_deref().ok_or_else(|| ApiError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        message: "push notifications are not configured".into(),
+    })
 }
 
 async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Response {
@@ -926,6 +1129,41 @@ impl From<SearchError> for ApiError {
                 status: StatusCode::BAD_GATEWAY,
                 message: value.to_string(),
             },
+        }
+    }
+}
+
+impl From<PushError> for ApiError {
+    fn from(value: PushError) -> Self {
+        match value {
+            PushError::DeviceToken | PushError::InvalidName => Self::bad_request(value.to_string()),
+            PushError::LeaseLost => Self::not_found(value.to_string()),
+            PushError::Database(_)
+            | PushError::Key(_)
+            | PushError::PayloadTooLarge
+            | PushError::Transport(_)
+            | PushError::Rejected { .. }
+            | PushError::TokenCache => Self::internal(value.to_string()),
+        }
+    }
+}
+
+impl From<AdsError> for ApiError {
+    fn from(value: AdsError) -> Self {
+        match value {
+            AdsError::Validation(_) => Self::bad_request(value.to_string()),
+            AdsError::Conflict(_) => Self {
+                status: StatusCode::CONFLICT,
+                message: value.to_string(),
+            },
+            AdsError::Payment(_) => Self {
+                status: StatusCode::PAYMENT_REQUIRED,
+                message: value.to_string(),
+            },
+            AdsError::Database(sqlx::Error::RowNotFound) => {
+                Self::not_found("ads resource not found")
+            }
+            AdsError::Database(_) => Self::internal(value.to_string()),
         }
     }
 }

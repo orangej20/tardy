@@ -80,6 +80,12 @@ Enable uploads with `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
 | `POST` | `/v1/search` | Consent-gated provider reranking over public posts |
 | `POST` | `/v1/explore` | Rerank public discovery candidates around stated interests |
 | `POST` | `/v1/agent-handoffs` | Create a direct-to-agent integration bundle |
+| `POST/DELETE` | `/v1/push/devices[/{id}]` | Register or retire an APNs device token |
+| `PUT` | `/v1/push/preferences` | Set a category-level notification preference |
+| `POST` | `/v1/ad-campaigns` | Create an advertiser-owned campaign or boost |
+| `POST` | `/v1/ad-campaigns/{id}/funding-intents` | Create a server-priced x402 funding intent |
+| `POST` | `/v1/ad-funding-intents/{id}/settle` | Verify, settle, and activate through x402 |
+| `GET` | `/v1/ad-campaigns/{id}/report` | Return spend, attributed revenue, creator earnings, and ROAS |
 
 OpenAPI 3.1 is generated from Rust schemas and can also be exported with `cargo run --locked --bin export-openapi -- openapi.json`. See `docs/api-clients.md` for TypeScript/Swift generation and the REST + resumable SSE streaming direction.
 
@@ -100,13 +106,26 @@ DATABASE_URL=postgresql://localhost/tardy tardy-ingest-worker
 
 Pollers claim due sources with `FOR UPDATE SKIP LOCKED`, retain RSS/GitHub conditional-fetch cursors, deduplicate source items, and create transformation work plus its outbox event in one transaction. A failed poll is released with bounded exponential backoff. Consumers must acknowledge or reschedule an outbox lease; events are at-least-once, so handlers use their event ID as an idempotency key.
 
-APNs uses token authentication over HTTP/2. Device registrations, per-category preferences, logical notifications, and per-device attempts have PG17 tables in migration `0002`. Keep the `.p8` signing key in the deployment secret store and pass it to `ApnsClient`; never persist it or send it to clients. The iOS client remains responsible for obtaining permission and forwarding every refreshed device token to the authenticated registration API once that route is exposed.
+APNs uses token authentication over HTTP/2. Device registrations, per-category preferences, logical notifications, and per-device attempts have PG17 tables in migrations `0002` and `0003`. Keep the `.p8` signing key in the deployment secret store and pass it to `ApnsClient`; never persist it or send it to clients. The iOS client remains responsible for obtaining permission and forwarding every refreshed device token to the authenticated registration API.
+
+Run one push worker per APNs environment and bundle topic. It claims only matching devices and handles APNs token invalidation as a permanent failure:
+
+```bash
+DATABASE_URL=postgresql://localhost/tardy \
+APNS_ENVIRONMENT=sandbox \
+APNS_TOPIC=com.example.tardy \
+APNS_KEY_ID=ABC123 APNS_TEAM_ID=TEAM123 \
+APNS_PRIVATE_KEY_PEM="$APNS_PRIVATE_KEY_PEM" \
+tardy-push-worker
+```
+
+Clients register refreshed tokens at `POST /v1/push/devices`, remove them at `DELETE /v1/push/devices/{id}`, and set category-level opt-outs at `PUT /v1/push/preferences`. These routes require account authentication, but not a selected publishing profile. `DATABASE_URL` enables them on the API process; without it they fail visibly with `503`.
 
 Account credentials, one-time claim codes, and account/profile ownership are durable in SQLite. Claim codes and API tokens are stored only as digests. Profile/content/DM storage remains intentionally in-memory for this slice. Full durable social storage, follower graphs, actual video transport, the x402 facilitator client, and UI are next-stage boundaries—not silent mock implementations.
 
 New profiles default to private, DMs default closed, content defaults private, and resharing defaults owner-only. Authenticated profile requests require a bearer token plus `X-Tardy-Profile-ID`; the account must own that profile.
 
-The x402 types use the v2 `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, and `PAYMENT-RESPONSE` HTTP contract. Ad rates calculate from requested impressions; network, asset, recipient, and atomic-unit rate will be deployment configuration. Ads must remain visibly labeled and must pass the same moderation rules as ordinary public content.
+The x402 flow uses the v2 `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, and `PAYMENT-RESPONSE` HTTP contract. Configure `X402_FACILITATOR_URL`, `X402_NETWORK`, `X402_ASSET`, `X402_PAY_TO`, and `X402_ATOMIC_PER_BUDGET_MICRO`; hosted facilitator credentials belong in `X402_FACILITATOR_BEARER_TOKEN`. Create a campaign and funding intent, then POST the base64 x402 payment payload to `/v1/ad-funding-intents/{id}/settle`. Tardy calls both facilitator `/verify` and `/settle`, binds the receipt to the quoted network/amount/asset/recipient, persists it, and activates the campaign exactly once. Ads must remain visibly labeled and pass the same moderation rules as ordinary public content.
 
 ## Manual live-session runbook
 

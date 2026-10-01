@@ -13,7 +13,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo build --locked --release --bins && \
     cp target/release/tardy /tmp/tardy && \
-    cp target/release/ingest-worker /tmp/tardy-ingest-worker
+    cp target/release/ingest-worker /tmp/tardy-ingest-worker && \
+    cp target/release/push-worker /tmp/tardy-push-worker
 
 FROM alpine:3.22
 
@@ -25,6 +26,7 @@ RUN apk add --no-cache ca-certificates && \
 
 COPY --from=builder /tmp/tardy /usr/local/bin/tardy
 COPY --from=builder /tmp/tardy-ingest-worker /usr/local/bin/tardy-ingest-worker
+COPY --from=builder /tmp/tardy-push-worker /usr/local/bin/tardy-push-worker
 
 USER tardy:tardy
 WORKDIR /data

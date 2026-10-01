@@ -6,6 +6,9 @@ use tardy::ingest::{
     Transport,
 };
 use tardy::pg_ingest::PgIngestStore;
+use tardy::push::{
+    ApnsEnvironment, NewNotification, NotificationPreference, PgPushStore, RegisterPushDevice,
+};
 
 #[tokio::test]
 async fn polling_is_deduplicated_and_enqueues_exactly_once() {
@@ -16,7 +19,8 @@ async fn polling_is_deduplicated_and_enqueues_exactly_once() {
     let store = PgIngestStore::connect(&database_url, 2).await.unwrap();
     store.migrate().await.unwrap();
     sqlx::query(
-        "TRUNCATE outbox, transformation_runs, source_items, source_channels RESTART IDENTITY CASCADE",
+        "TRUNCATE push_deliveries, push_notifications, notification_preferences, push_devices,
+         outbox, transformation_runs, source_items, source_channels RESTART IDENTITY CASCADE",
     )
     .execute(&pool)
     .await
@@ -79,6 +83,53 @@ async fn polling_is_deduplicated_and_enqueues_exactly_once() {
             .unwrap()
             .is_empty()
     );
+
+    let push = PgPushStore::connect(&database_url, 2).await.unwrap();
+    let account_id = uuid::Uuid::new_v4();
+    let device = push
+        .register_device(
+            account_id,
+            RegisterPushDevice {
+                token: "ab".repeat(32),
+                environment: ApnsEnvironment::Sandbox,
+                topic: "com.tardy.app".into(),
+            },
+        )
+        .await
+        .unwrap();
+    push.set_preference(
+        account_id,
+        NotificationPreference {
+            category: "hyper_tardy".into(),
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    let source_event_id = uuid::Uuid::new_v4();
+    let notification = NewNotification {
+        source_event_id,
+        account_id,
+        category: "hyper_tardy".into(),
+        title: "Hyper-Tardy".into(),
+        body: "A post is breaking.".into(),
+        deep_link: Some("tardy://posts/post-1".into()),
+        data: serde_json::Map::new(),
+    };
+    assert_eq!(
+        push.enqueue(notification.clone()).await.unwrap(),
+        source_event_id
+    );
+    assert_eq!(push.enqueue(notification).await.unwrap(), source_event_id);
+    let deliveries = push
+        .claim_deliveries("push-a", ApnsEnvironment::Sandbox, "com.tardy.app", 10)
+        .await
+        .unwrap();
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].device_id, device.id);
+    push.mark_delivered("push-a", deliveries[0].id, None)
+        .await
+        .unwrap();
 }
 
 fn source() -> SourceDefinition {

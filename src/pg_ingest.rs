@@ -253,7 +253,7 @@ impl PgIngestStore {
         let rows = sqlx::query(
             "WITH claimed AS (
                SELECT id FROM outbox
-               WHERE delivered_at IS NULL AND available_at <= now()
+               WHERE delivered_at IS NULL AND failed_at IS NULL AND available_at <= now()
                  AND (lease_until IS NULL OR lease_until < now())
                ORDER BY available_at, id FOR UPDATE SKIP LOCKED LIMIT $1
              )
@@ -261,6 +261,42 @@ impl PgIngestStore {
              FROM claimed WHERE o.id=claimed.id
              RETURNING o.id,o.topic,o.aggregate_type,o.aggregate_id,o.payload,o.attempts",
         )
+        .bind(limit)
+        .bind(worker)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(OutboxEvent {
+                    id: row.try_get("id")?,
+                    topic: row.try_get("topic")?,
+                    aggregate_type: row.try_get("aggregate_type")?,
+                    aggregate_id: row.try_get("aggregate_id")?,
+                    payload: row.try_get("payload")?,
+                    attempts: row.try_get("attempts")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn claim_outbox_topic(
+        &self,
+        worker: &str,
+        topic: &str,
+        limit: i64,
+    ) -> Result<Vec<OutboxEvent>, PgIngestError> {
+        let rows = sqlx::query(
+            "WITH claimed AS (
+               SELECT id FROM outbox
+               WHERE topic=$1 AND delivered_at IS NULL AND failed_at IS NULL AND available_at<=now()
+                 AND (lease_until IS NULL OR lease_until<now())
+               ORDER BY available_at,id FOR UPDATE SKIP LOCKED LIMIT $2
+             )
+             UPDATE outbox o SET lease_owner=$3,lease_until=now()+interval '60 seconds',attempts=o.attempts+1
+             FROM claimed WHERE o.id=claimed.id
+             RETURNING o.id,o.topic,o.aggregate_type,o.aggregate_id,o.payload,o.attempts",
+        )
+        .bind(topic)
         .bind(limit)
         .bind(worker)
         .fetch_all(&self.pool)
@@ -311,6 +347,26 @@ impl PgIngestStore {
                  WHERE id=$3 AND delivered_at IS NULL AND lease_owner=$4",
             )
             .bind(delay_seconds)
+            .bind(error)
+            .bind(event_id)
+            .bind(worker)
+            .execute(&self.pool)
+            .await?
+            .rows_affected(),
+        )
+    }
+
+    pub async fn fail_outbox(
+        &self,
+        worker: &str,
+        event_id: Uuid,
+        error: &str,
+    ) -> Result<(), PgIngestError> {
+        require_one(
+            sqlx::query(
+                "UPDATE outbox SET failed_at=now(),lease_owner=NULL,lease_until=NULL,last_error=left($1,2000)
+                 WHERE id=$2 AND delivered_at IS NULL AND failed_at IS NULL AND lease_owner=$3",
+            )
             .bind(error)
             .bind(event_id)
             .bind(worker)
