@@ -17,7 +17,68 @@ pub struct Profile {
     pub handle: String,
     pub display_name: String,
     pub bio: String,
+    pub privacy: ProfilePrivacy,
     pub created_at_ms: TimestampMs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileVisibility {
+    Public,
+    Unlisted,
+    Private,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DirectMessagePolicy {
+    Everyone,
+    Nobody,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResharePolicy {
+    OwnerOnly,
+    AnyoneWhoCanView,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfilePrivacy {
+    pub profile_visibility: ProfileVisibility,
+    pub direct_messages: DirectMessagePolicy,
+    pub resharing: ResharePolicy,
+    pub default_content_visibility: Visibility,
+}
+
+impl Default for ProfilePrivacy {
+    fn default() -> Self {
+        Self {
+            profile_visibility: ProfileVisibility::Private,
+            direct_messages: DirectMessagePolicy::Nobody,
+            resharing: ResharePolicy::OwnerOnly,
+            default_content_visibility: Visibility::Private,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicProfile {
+    pub id: Uuid,
+    pub handle: String,
+    pub display_name: String,
+    pub bio: String,
+}
+
+impl From<&Profile> for PublicProfile {
+    fn from(value: &Profile) -> Self {
+        Self {
+            id: value.id,
+            handle: value.handle.clone(),
+            display_name: value.display_name.clone(),
+            bio: value.bio.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +164,34 @@ pub struct AgentCapabilities {
     pub start_live_url: String,
     pub append_live_event_url_template: String,
     pub end_live_url_template: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectThread {
+    pub id: Uuid,
+    pub participants: [Uuid; 2],
+    pub created_at_ms: TimestampMs,
+    pub latest_sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectMessage {
+    pub thread_id: Uuid,
+    pub sequence: u64,
+    pub sender_id: Uuid,
+    pub body: String,
+    pub sent_at_ms: TimestampMs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareGrant {
+    pub id: Uuid,
+    pub token: Uuid,
+    pub created_by: Uuid,
+    pub subject: ShareSubject,
+    pub created_at_ms: TimestampMs,
+    pub expires_at_ms: Option<TimestampMs>,
+    pub revoked_at_ms: Option<TimestampMs>,
 }
 
 impl FeedItem {

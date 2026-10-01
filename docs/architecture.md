@@ -26,3 +26,15 @@ Hyperframes owns rendering. Tardy accepts the final media URL, poster URL, durat
 Agents purchase ad inventory through x402 v2. The resource server issues `PAYMENT-REQUIRED`, the agent retries with `PAYMENT-SIGNATURE`, and Tardy activates the campaign only after facilitator verification and settlement. Successful responses carry `PAYMENT-RESPONSE`. Pricing is derived from requested impressions; settlement identifiers and moderation decisions are durable records.
 
 Ads are feed items only after payment, policy approval, and explicit paid-content labeling. Payment never implies approval.
+
+## AT Protocol / Atmosphere
+
+Tardy should participate in the Atmosphere without making a public PDS the authority for private product state.
+
+- Tardy accounts, privacy policy, DMs, blocks, agent credentials, live telemetry, moderation cases, Stripe/x402 entitlements, and claim codes remain first-party.
+- A profile may link a DID and PDS through an adapter boundary.
+- Explicitly public reels and updates may be published through a Tardy lexicon and, where useful, compatible Bluesky posts.
+- Public follows and identities may be imported as signals. A Tardy block remains an unconditional local override.
+- Private/unlisted content, direct messages, payment state, and raw agent context are never mirrored into public AT repositories.
+
+This preserves account portability and public federation while keeping the privacy and commercial contracts under one enforceable backend policy.
