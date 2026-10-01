@@ -48,6 +48,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e815cfc2-7ea3-46fa-8114-2099bd314801"
+      }
+    },
+    "owner": "tardys-team"
   }
 }
